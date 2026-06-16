@@ -58,17 +58,6 @@ const ICONS = {
 };
 const iconFor = (name) => ICONS[name] || Box;
 
-// Visual size by category (px on canvas)
-const SIZE_BY_CATEGORY = {
-  power_source: 26,
-  switching: 24,
-  distribution: 22,
-  control: 20,
-  consumer: 20,
-  protection: 22,
-  monitoring: 18,
-  passive: 16,
-};
 
 const TROUBLESHOOT_STEPS = {
   power_source: [
@@ -130,107 +119,122 @@ const TROUBLESHOOT_STEPS = {
 };
 
 // =====================================================================
-// Node marker
+// Node marker — compact rectangle, counter-scaled, LOD labels
 // =====================================================================
+// W × H is constant on screen regardless of zoom level.
+// Only faulted nodes get animated spans (few → cheap).
+// Plain <button> instead of motion.button for 300+ node performance.
+const NODE_W = 12; // px constant screen width
+const NODE_H = 8;  // px constant screen height
+
 function NodeMarker({ node, onSelect, isSelected, zoom }) {
-  const Icon = iconFor(node.type_icon);
   const isFault = node.status === 'fault';
   const isAffected = node.status === 'affected';
-
-  // Screen size stays constant regardless of zoom (counter-scaled below)
-  const size = node.width
-    ? Math.max(28, Math.round(node.width / 10))
-    : SIZE_BY_CATEGORY[node.type_category] || 44;
-
   const safeZoom = zoom || 1;
 
-  const baseRing = isFault ? 'ring-red-500' : isAffected ? 'ring-amber-500/70' : 'ring-emerald-500/40';
-  const baseBg = isFault ? 'bg-red-950/80' : isAffected ? 'bg-amber-950/60' : 'bg-zinc-900/80';
-  const iconColor = isFault ? 'text-red-400' : isAffected ? 'text-amber-400' : 'text-emerald-400';
+  // Border and fill colours by status
+  const borderColor = isFault ? '#ef4444' : isAffected ? '#f59e0b' : '#22c55e';
+  const fillColor   = isFault ? 'rgba(127,29,29,0.92)'
+                    : isAffected ? 'rgba(120,53,15,0.88)'
+                    : 'rgba(15,23,32,0.82)';
 
-  // Show full name label below the pin when sufficiently zoomed in
-  const showNameLabel = safeZoom > 2.2;
+  // Level-of-detail text below the rect
+  const showCode = safeZoom > 3;
+  const showName = safeZoom > 7;
 
   return (
-    <motion.button
+    <button
       type="button"
       onClick={() => onSelect(node)}
-      initial={{ opacity: 0, scale: 0.6 }}
-      animate={{ opacity: isAffected ? 0.92 : 1, scale: 1 }}
-      whileHover={{ scale: 1.08 }}
-      transition={{ type: 'spring', stiffness: 280, damping: 22 }}
-      className={`group absolute ${baseBg} ${baseRing} ring-2 rounded-xl backdrop-blur-sm border border-white/5 shadow-[0_8px_30px_rgb(0,0,0,0.5)] flex flex-col items-center justify-center gap-1 select-none transition-colors`}
+      className="group absolute"
       style={{
         left: node.coordinates.x,
         top: node.coordinates.y,
-        width: size,
-        height: size,
-        // Counter-scale: keeps the pin at a constant screen size regardless of canvas zoom
-        transform: `translate(-50%, -50%) scale(${1 / safeZoom}) rotate(${node.rotation || 0}deg)`,
+        width: NODE_W,
+        height: NODE_H,
+        padding: 0,
+        background: 'none',
+        border: 'none',
+        cursor: 'pointer',
+        // Counter-scale: pin stays constant screen size at every zoom level
+        transform: `translate(-50%, -50%) scale(${1 / safeZoom})`,
       }}
     >
-      {isFault && (
-        <>
-          <motion.span
-            className="absolute inset-0 rounded-xl bg-red-500/20"
-            animate={{ opacity: [0.2, 0.8, 0.2], scale: [1, 1.18, 1] }}
-            transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
-          />
-          <motion.span
-            className="absolute inset-0 rounded-xl shadow-[0_0_40px_8px_rgba(239,68,68,0.55)]"
-            animate={{ opacity: [0.6, 1, 0.6] }}
-            transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut' }}
-          />
-          <motion.span
-            className="absolute -inset-3 rounded-2xl border-2 border-red-500/60"
-            animate={{ scale: [1, 1.4, 1.8], opacity: [0.8, 0.3, 0] }}
-            transition={{ duration: 1.6, repeat: Infinity, ease: 'easeOut' }}
-          />
-        </>
-      )}
-      {isAffected && (
-        <motion.span
-          className="absolute inset-0 rounded-xl shadow-[0_0_22px_2px_rgba(245,158,11,0.35)]"
-          animate={{ opacity: [0.4, 0.7, 0.4] }}
-          transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
-        />
-      )}
-
+      {/* ── Main rectangle ── */}
       <div
-        className="relative z-10 flex flex-col items-center justify-center gap-1"
-        style={{ transform: `rotate(${-(node.rotation || 0)}deg)` }}
+        style={{
+          width: NODE_W,
+          height: NODE_H,
+          backgroundColor: fillColor,
+          border: `1.5px solid ${borderColor}`,
+          borderRadius: '2px',
+          position: 'relative',
+          boxShadow: isFault ? `0 0 8px 1px ${borderColor}80` : 'none',
+        }}
       >
-        <Icon className={iconColor} size={size > 50 ? 22 : 18} />
-        <span className="text-[9px] font-semibold text-zinc-300 leading-none tracking-wide">
-          {node.id}
-        </span>
+        {/* Fault pulse — only rendered when faulted */}
+        {isFault && (
+          <>
+            <motion.span
+              className="absolute inset-0"
+              style={{ borderRadius: '2px', background: 'rgba(239,68,68,0.3)' }}
+              animate={{ opacity: [0.2, 0.85, 0.2] }}
+              transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
+            />
+            <motion.span
+              className="absolute"
+              style={{ inset: '-5px', borderRadius: '4px', border: '1.5px solid rgba(239,68,68,0.5)' }}
+              animate={{ scale: [1, 1.5, 2], opacity: [0.7, 0.3, 0] }}
+              transition={{ duration: 1.6, repeat: Infinity, ease: 'easeOut' }}
+            />
+          </>
+        )}
+        {/* Affected dim pulse */}
+        {isAffected && (
+          <motion.span
+            className="absolute inset-0"
+            style={{ borderRadius: '2px', background: 'rgba(245,158,11,0.2)' }}
+            animate={{ opacity: [0.1, 0.5, 0.1] }}
+            transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+          />
+        )}
+        {/* Selection ring */}
+        {isSelected && (
+          <span
+            className="absolute pointer-events-none"
+            style={{ inset: '-4px', border: '2px solid #f97316', borderRadius: '4px' }}
+          />
+        )}
       </div>
 
-      <span
-        className={`absolute -top-1.5 -right-1.5 h-3 w-3 rounded-full border border-zinc-950 ${
-          isFault ? 'bg-red-500' : isAffected ? 'bg-amber-500' : 'bg-emerald-500'
-        }`}
-      />
-
-      {/* Hover tooltip — always present */}
-      <span className="pointer-events-none absolute top-full mt-2 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-medium text-zinc-300 bg-zinc-950/90 border border-white/10 px-2 py-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity z-20">
+      {/* ── Hover tooltip (always) ── */}
+      <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-medium text-zinc-200 bg-zinc-950/95 border border-white/10 px-2 py-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity z-50 shadow-lg"
+        style={{ top: '100%', marginTop: '4px' }}
+      >
+        <span className="font-mono text-[9px] text-zinc-500 mr-1.5">{node.id}</span>
         {node.name}
       </span>
 
-      {/* Persistent name label — appears when sufficiently zoomed in */}
-      {showNameLabel && (
+      {/* ── LOD: code label at zoom > 3 ── */}
+      {showCode && !showName && (
         <span
-          className="pointer-events-none absolute left-1/2 whitespace-nowrap text-[10px] font-medium text-zinc-200 bg-zinc-900/80 border border-white/10 px-1.5 py-0.5 rounded z-20"
-          style={{ top: '100%', transform: 'translateX(-50%)', marginTop: '5px' }}
+          className="pointer-events-none absolute left-1/2 whitespace-nowrap font-mono text-zinc-400 z-10 leading-none"
+          style={{ fontSize: '8px', top: '100%', transform: 'translateX(-50%)', marginTop: '2px' }}
+        >
+          {node.id}
+        </span>
+      )}
+
+      {/* ── LOD: full name at zoom > 7 ── */}
+      {showName && (
+        <span
+          className="pointer-events-none absolute left-1/2 whitespace-nowrap text-[9px] font-medium text-zinc-200 bg-zinc-900/85 border border-white/10 px-1.5 py-0.5 rounded z-10"
+          style={{ top: '100%', transform: 'translateX(-50%)', marginTop: '2px' }}
         >
           {node.name}
         </span>
       )}
-
-      {isSelected && (
-        <span className="absolute -inset-1.5 rounded-2xl border-2 border-orange-400 pointer-events-none" />
-      )}
-    </motion.button>
+    </button>
   );
 }
 
