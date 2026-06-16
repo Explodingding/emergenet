@@ -327,6 +327,7 @@ function FaultPanel({ buildings, nodes, faultedIds, onInject, onClear, onSelect,
   const [query, setQuery] = useState('');
   const [activeBldg, setActiveBldg] = useState(null);   // building code filter
   const [activeCat, setActiveCat] = useState(null);     // category filter
+  // Auto-collapse large sections on first render; user can expand manually
   const [collapsedBldgs, setCollapsedBldgs] = useState(() => new Set());
 
   // Buildings that actually have nodes on the current floor
@@ -381,7 +382,7 @@ function FaultPanel({ buildings, nodes, faultedIds, onInject, onClear, onSelect,
 
   return (
     <motion.aside
-      animate={{ width: collapsed ? 60 : 360 }}
+      animate={{ width: collapsed ? 60 : 420 }}
       transition={{ type: 'spring', stiffness: 220, damping: 26 }}
       className="relative shrink-0 h-full bg-zinc-950/80 backdrop-blur-xl border-r border-white/5 flex flex-col"
     >
@@ -445,66 +446,62 @@ function FaultPanel({ buildings, nodes, faultedIds, onInject, onClear, onSelect,
               )}
             </div>
 
-            {/* Building filter pills */}
-            <div className="overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-              <div className="flex gap-1 min-w-max pb-0.5">
-                <button
-                  onClick={() => setActiveBldg(null)}
-                  className={`h-6 px-2 rounded text-[10px] font-semibold transition-colors whitespace-nowrap ${
-                    !activeBldg
-                      ? 'bg-white/15 text-zinc-100'
-                      : 'bg-white/[0.04] text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.07]'
-                  }`}
-                >
-                  All <span className="font-mono opacity-60">({nodes.length})</span>
-                </button>
-                {presentBuildings.map((b) => {
-                  const cnt = nodes.filter((n) => n.building === b.code).length;
-                  const isActive = activeBldg === b.code;
-                  return (
-                    <button
-                      key={b.code}
-                      onClick={() => setActiveBldg((prev) => (prev === b.code ? null : b.code))}
-                      className="h-6 px-2 rounded text-[10px] font-semibold transition-all whitespace-nowrap"
-                      style={
-                        isActive
-                          ? { background: `${b.accent}25`, color: b.accent, border: `1px solid ${b.accent}50` }
-                          : { color: '#71717a', border: '1px solid transparent' }
-                      }
-                    >
-                      {b.code} <span className="font-mono opacity-60">({cnt})</span>
-                    </button>
-                  );
-                })}
-              </div>
+            {/* Building filter pills — wrap on multiple rows */}
+            <div className="flex flex-wrap gap-1">
+              <button
+                onClick={() => setActiveBldg(null)}
+                className={`h-6 px-2 rounded text-[10px] font-semibold transition-colors whitespace-nowrap ${
+                  !activeBldg
+                    ? 'bg-white/15 text-zinc-100'
+                    : 'bg-white/[0.04] text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.07]'
+                }`}
+              >
+                All <span className="font-mono opacity-60">({nodes.length})</span>
+              </button>
+              {presentBuildings.map((b) => {
+                const cnt = nodes.filter((n) => n.building === b.code).length;
+                const isActive = activeBldg === b.code;
+                return (
+                  <button
+                    key={b.code}
+                    onClick={() => setActiveBldg((prev) => (prev === b.code ? null : b.code))}
+                    className="h-6 px-2 rounded text-[10px] font-semibold transition-all whitespace-nowrap"
+                    style={
+                      isActive
+                        ? { background: `${b.accent}25`, color: b.accent, border: `1px solid ${b.accent}50` }
+                        : { background: 'rgba(255,255,255,0.04)', color: '#71717a', border: '1px solid transparent' }
+                    }
+                  >
+                    {b.code} <span className="font-mono opacity-60">({cnt})</span>
+                  </button>
+                );
+              })}
             </div>
 
-            {/* Category filter pills */}
+            {/* Category filter chips — wrap */}
             {presentCats.size > 1 && (
-              <div className="overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-                <div className="flex gap-1 min-w-max">
+              <div className="flex flex-wrap gap-1">
+                <button
+                  onClick={() => setActiveCat(null)}
+                  className={`h-5 px-2 rounded text-[9px] font-mono transition-colors ${
+                    !activeCat ? 'bg-white/10 text-zinc-300' : 'text-zinc-600 hover:text-zinc-400'
+                  }`}
+                >
+                  all
+                </button>
+                {[...presentCats.entries()].sort((a, b) => b[1] - a[1]).map(([cat, cnt]) => (
                   <button
-                    onClick={() => setActiveCat(null)}
-                    className={`h-5 px-2 rounded text-[9px] font-mono transition-colors ${
-                      !activeCat ? 'bg-white/10 text-zinc-300' : 'text-zinc-600 hover:text-zinc-400'
+                    key={cat}
+                    onClick={() => setActiveCat((prev) => (prev === cat ? null : cat))}
+                    className={`h-5 px-2 rounded text-[9px] font-mono transition-colors whitespace-nowrap ${
+                      activeCat === cat
+                        ? 'bg-white/10 text-zinc-200'
+                        : 'text-zinc-600 hover:text-zinc-400'
                     }`}
                   >
-                    all
+                    {CAT_SHORT[cat] || cat} <span className="opacity-50">({cnt})</span>
                   </button>
-                  {[...presentCats.entries()].sort((a, b) => b[1] - a[1]).map(([cat, cnt]) => (
-                    <button
-                      key={cat}
-                      onClick={() => setActiveCat((prev) => (prev === cat ? null : cat))}
-                      className={`h-5 px-2 rounded text-[9px] font-mono transition-colors whitespace-nowrap ${
-                        activeCat === cat
-                          ? 'bg-white/10 text-zinc-200'
-                          : 'text-zinc-600 hover:text-zinc-400'
-                      }`}
-                    >
-                      {CAT_SHORT[cat] || cat} <span className="opacity-50">({cnt})</span>
-                    </button>
-                  ))}
-                </div>
+                ))}
               </div>
             )}
           </div>
@@ -582,21 +579,20 @@ function FaultPanel({ buildings, nodes, faultedIds, onInject, onClear, onSelect,
                                   {n.id} · {n.type_label}
                                 </div>
                               </div>
-                              <Button
-                                variant={isFaulted ? 'destructive' : 'outline'}
-                                size="sm"
-                                className="h-5 px-1.5 text-[9px] font-bold flex-shrink-0"
+                              <button
+                                title={isFaulted ? 'Clear fault' : 'Inject fault'}
+                                className={`flex-shrink-0 h-6 w-6 rounded flex items-center justify-center border transition-colors ${
+                                  isFaulted
+                                    ? 'bg-red-500/20 border-red-500/50 text-red-400 hover:bg-red-500/30'
+                                    : 'bg-white/[0.04] border-white/10 text-zinc-400 hover:bg-white/10 hover:text-zinc-200'
+                                }`}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   onInject(n.id);
                                 }}
                               >
-                                {isFaulted ? (
-                                  <><X size={9} className="mr-0.5" /> CLR</>
-                                ) : (
-                                  <><Zap size={9} className="mr-0.5" /> INJ</>
-                                )}
-                              </Button>
+                                {isFaulted ? <X size={10} /> : <Zap size={10} />}
+                              </button>
                             </div>
                           );
                         })}
