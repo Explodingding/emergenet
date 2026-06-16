@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
-export const CM_PER_PX = 20;
+export const CM_PER_PX = 15;
 
 function extractRating(p) {
   if (!p) return null;

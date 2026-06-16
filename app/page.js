@@ -727,7 +727,7 @@ function Legend() {
       <LegendRow color="bg-amber-500" label="Affected (obszar zagrożony)" />
       <LegendRow color="bg-red-500" label="Fault — root cause" pulse />
       <Separator className="my-2 bg-white/5" />
-      <div className="text-[9px] font-mono text-zinc-600">scale 1 px = 20 cm</div>
+      <div className="text-[9px] font-mono text-zinc-600">scale 1 px = 15 cm</div>
     </div>
   );
 }
@@ -890,7 +890,7 @@ export default function HomePage() {
                   Plant Blueprint · Sector A
                 </div>
                 <div className="text-[9px] font-mono text-zinc-700 mt-0.5">
-                  Top-down view · 1 px = 20 cm · {nodes.length} objects
+                  Top-down view · 1 px = 15 cm · {nodes.length} objects
                 </div>
               </div>
             </div>
