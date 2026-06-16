@@ -3,7 +3,9 @@
 -- =====================================================================
 -- Conventions:
 --   * All primary keys are UUID v4 (gen_random_uuid())
+--   * All distances/positions are stored in CENTIMETRES (integer, 1 cm precision)
 --   * Coordinates (coord_x, coord_y) refer to the CENTER of the object
+--   * width/height in objects are in cm as well (nullable -> fallback to type default_size)
 --   * Rotation is constrained to {0, 90, 180, 270}
 --   * Status (operational/fault/affected) is NOT persisted — it is
 --     computed at runtime from the dependency graph + open fault_events
@@ -20,10 +22,10 @@ create table public.buildings (
   code            text not null unique,
   name            text not null,
   description     text,
-  bounds_x        integer not null,
-  bounds_y        integer not null,
-  bounds_w        integer not null check (bounds_w > 0),
-  bounds_h        integer not null check (bounds_h > 0),
+  bounds_x        integer not null,                    -- top-left X in cm
+  bounds_y        integer not null,                    -- top-left Y in cm
+  bounds_w        integer not null check (bounds_w > 0), -- width in cm
+  bounds_h        integer not null check (bounds_h > 0), -- height in cm
   accent_color    text not null default '#3b82f6',
   display_order   integer not null default 0,
   created_at      timestamptz not null default now(),
@@ -59,7 +61,7 @@ create table public.object_types (
                      )),
   icon               text not null default 'Box',     -- lucide-react icon
   default_color      text not null default '#10b981',
-  default_size       integer not null default 48,
+  default_size       integer not null default 100,    -- in CENTIMETRES
   properties_schema  jsonb,                    -- optional JSON Schema for validation
   description        text,
   created_at         timestamptz not null default now()
@@ -75,11 +77,11 @@ create table public.objects (
   type_id           uuid not null references public.object_types(id) on delete restrict,
   building_id       uuid not null references public.buildings(id)    on delete restrict,
   primary_floor_id  uuid not null references public.floors(id)       on delete restrict,
-  coord_x           integer not null check (coord_x >= 0),            -- CENTER X (px)
-  coord_y           integer not null check (coord_y >= 0),            -- CENTER Y (px)
+  coord_x           integer not null check (coord_x >= 0),            -- CENTER X (cm)
+  coord_y           integer not null check (coord_y >= 0),            -- CENTER Y (cm)
   rotation          smallint not null default 0 check (rotation in (0, 90, 180, 270)),
-  width             integer check (width > 0),                        -- nullable: overrides type default_size
-  height            integer check (height > 0),
+  width             integer check (width > 0),                        -- cm (nullable: overrides type default_size)
+  height            integer check (height > 0),                        -- cm
   properties        jsonb not null default '{}'::jsonb,               -- type-specific spec
   metadata          jsonb,                                            -- free-form extras
   is_active         boolean not null default true,
@@ -200,25 +202,25 @@ begin
 end$$;
 
 -- =====================================================================
--- SEED: object_types catalog (16 starter types)
+-- SEED: object_types catalog (16 starter types) — default_size in CM
 -- =====================================================================
 insert into public.object_types (code, label, category, icon, default_color, default_size, description) values
-  ('transformer',        'Transformer',          'power_source', 'Zap',            '#10b981', 64, 'Power transformer (HV/LV)'),
-  ('generator',          'Diesel Generator',     'power_source', 'Fuel',           '#10b981', 60, 'Backup diesel generator'),
-  ('battery_bank',       'Battery Bank',         'power_source', 'BatteryFull',    '#10b981', 50, 'Battery storage / DC backup'),
-  ('switchgear',         'Switchgear',           'switching',    'CircuitBoard',   '#10b981', 58, 'Main switchgear assembly'),
-  ('breaker',            'Circuit Breaker',      'switching',    'Power',          '#10b981', 40, 'Individual circuit breaker'),
-  ('distribution_board', 'Distribution Board',   'distribution', 'Cpu',            '#10b981', 50, 'Sub-distribution panel'),
-  ('mcc',                'Motor Control Center', 'distribution', 'LayoutPanelTop', '#10b981', 56, 'MCC bucket assembly'),
-  ('cabinet',            'Control Cabinet',      'control',      'Box',            '#10b981', 44, 'Generic control cabinet'),
-  ('plc',                'PLC',                  'control',      'Cpu',            '#10b981', 40, 'Programmable logic controller'),
-  ('vfd_drive',          'VFD Drive',            'control',      'Gauge',          '#10b981', 44, 'Variable frequency drive'),
-  ('ups',                'UPS',                  'protection',   'ShieldCheck',    '#10b981', 50, 'Uninterruptible power supply'),
-  ('motor',              'Motor',                'consumer',     'Cog',            '#10b981', 42, 'Electric motor'),
-  ('heater',             'Heater',               'consumer',     'Flame',          '#10b981', 42, 'Heating element'),
-  ('light_panel',        'Lighting Panel',       'consumer',     'Lightbulb',      '#10b981', 40, 'Lighting distribution'),
-  ('junction_box',       'Junction Box',         'passive',      'Square',         '#10b981', 30, 'Wiring junction'),
-  ('measurement',        'Measurement Device',   'monitoring',   'Activity',       '#10b981', 36, 'Power meter / sensor');
+  ('transformer',        'Transformer',          'power_source', 'Zap',            '#10b981', 250, 'Power transformer (HV/LV)'),
+  ('generator',          'Diesel Generator',     'power_source', 'Fuel',           '#10b981', 350, 'Backup diesel generator'),
+  ('battery_bank',       'Battery Bank',         'power_source', 'BatteryFull',    '#10b981', 120, 'Battery storage / DC backup'),
+  ('switchgear',         'Switchgear',           'switching',    'CircuitBoard',   '#10b981', 200, 'Main switchgear assembly'),
+  ('breaker',            'Circuit Breaker',      'switching',    'Power',          '#10b981', 30,  'Individual circuit breaker'),
+  ('distribution_board', 'Distribution Board',   'distribution', 'Cpu',            '#10b981', 100, 'Sub-distribution panel'),
+  ('mcc',                'Motor Control Center', 'distribution', 'LayoutPanelTop', '#10b981', 180, 'MCC bucket assembly'),
+  ('cabinet',            'Control Cabinet',      'control',      'Box',            '#10b981', 80,  'Generic control cabinet'),
+  ('plc',                'PLC',                  'control',      'Cpu',            '#10b981', 40,  'Programmable logic controller'),
+  ('vfd_drive',          'VFD Drive',            'control',      'Gauge',          '#10b981', 60,  'Variable frequency drive'),
+  ('ups',                'UPS',                  'protection',   'ShieldCheck',    '#10b981', 80,  'Uninterruptible power supply'),
+  ('motor',              'Motor',                'consumer',     'Cog',            '#10b981', 70,  'Electric motor'),
+  ('heater',             'Heater',               'consumer',     'Flame',          '#10b981', 80,  'Heating element'),
+  ('light_panel',        'Lighting Panel',       'consumer',     'Lightbulb',      '#10b981', 50,  'Lighting distribution'),
+  ('junction_box',       'Junction Box',         'passive',      'Square',         '#10b981', 25,  'Wiring junction'),
+  ('measurement',        'Measurement Device',   'monitoring',   'Activity',       '#10b981', 30,  'Power meter / sensor');
 
 -- =====================================================================
 -- (No seed for buildings/objects — you populate via Supabase Studio)
