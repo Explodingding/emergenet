@@ -131,18 +131,24 @@ const TROUBLESHOOT_STEPS = {
 // =====================================================================
 // Node marker
 // =====================================================================
-function NodeMarker({ node, onSelect, isSelected }) {
+function NodeMarker({ node, onSelect, isSelected, zoom }) {
   const Icon = iconFor(node.type_icon);
   const isFault = node.status === 'fault';
   const isAffected = node.status === 'affected';
 
+  // Screen size stays constant regardless of zoom (counter-scaled below)
   const size = node.width
     ? Math.max(28, Math.round(node.width / 10))
     : SIZE_BY_CATEGORY[node.type_category] || 44;
 
+  const safeZoom = zoom || 1;
+
   const baseRing = isFault ? 'ring-red-500' : isAffected ? 'ring-amber-500/70' : 'ring-emerald-500/40';
   const baseBg = isFault ? 'bg-red-950/80' : isAffected ? 'bg-amber-950/60' : 'bg-zinc-900/80';
   const iconColor = isFault ? 'text-red-400' : isAffected ? 'text-amber-400' : 'text-emerald-400';
+
+  // Show full name label below the pin when sufficiently zoomed in
+  const showNameLabel = safeZoom > 2.2;
 
   return (
     <motion.button
@@ -152,13 +158,14 @@ function NodeMarker({ node, onSelect, isSelected }) {
       animate={{ opacity: isAffected ? 0.92 : 1, scale: 1 }}
       whileHover={{ scale: 1.08 }}
       transition={{ type: 'spring', stiffness: 280, damping: 22 }}
-      className={`group absolute -translate-x-1/2 -translate-y-1/2 ${baseBg} ${baseRing} ring-2 rounded-xl backdrop-blur-sm border border-white/5 shadow-[0_8px_30px_rgb(0,0,0,0.5)] flex flex-col items-center justify-center gap-1 select-none transition-colors`}
+      className={`group absolute ${baseBg} ${baseRing} ring-2 rounded-xl backdrop-blur-sm border border-white/5 shadow-[0_8px_30px_rgb(0,0,0,0.5)] flex flex-col items-center justify-center gap-1 select-none transition-colors`}
       style={{
         left: node.coordinates.x,
         top: node.coordinates.y,
         width: size,
         height: size,
-        transform: `translate(-50%, -50%) rotate(${node.rotation || 0}deg)`,
+        // Counter-scale: keeps the pin at a constant screen size regardless of canvas zoom
+        transform: `translate(-50%, -50%) scale(${1 / safeZoom}) rotate(${node.rotation || 0}deg)`,
       }}
     >
       {isFault && (
@@ -203,9 +210,22 @@ function NodeMarker({ node, onSelect, isSelected }) {
           isFault ? 'bg-red-500' : isAffected ? 'bg-amber-500' : 'bg-emerald-500'
         }`}
       />
+
+      {/* Hover tooltip — always present */}
       <span className="pointer-events-none absolute top-full mt-2 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-medium text-zinc-300 bg-zinc-950/90 border border-white/10 px-2 py-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity z-20">
         {node.name}
       </span>
+
+      {/* Persistent name label — appears when sufficiently zoomed in */}
+      {showNameLabel && (
+        <span
+          className="pointer-events-none absolute left-1/2 whitespace-nowrap text-[10px] font-medium text-zinc-200 bg-zinc-900/80 border border-white/10 px-1.5 py-0.5 rounded z-20"
+          style={{ top: '100%', transform: 'translateX(-50%)', marginTop: '5px' }}
+        >
+          {node.name}
+        </span>
+      )}
+
       {isSelected && (
         <span className="absolute -inset-1.5 rounded-2xl border-2 border-orange-400 pointer-events-none" />
       )}
@@ -216,8 +236,10 @@ function NodeMarker({ node, onSelect, isSelected }) {
 // =====================================================================
 // Building zone
 // =====================================================================
-function BuildingZone({ building, hasFault, hasAffected }) {
+function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom }) {
   const { bounds } = building;
+  // Scale building labels inversely so they stay readable at any zoom level
+  const safeZoom = zoom || 1;
   return (
     <div
       className="absolute rounded-2xl pointer-events-none"
@@ -255,15 +277,27 @@ function BuildingZone({ building, hasFault, hasAffected }) {
           }`}
         />
       ))}
-      <div className="absolute top-3 left-4 flex items-center gap-2">
+      {/* Building label — counter-scaled so it stays readable at every zoom level */}
+      <div
+        className="absolute top-3 left-4 flex items-center gap-2 origin-top-left"
+        style={{ transform: `scale(${1 / safeZoom})` }}
+      >
         <div
-          className="h-2 w-2 rounded-full"
+          className="h-2 w-2 rounded-full flex-shrink-0"
           style={{ background: building.accent, boxShadow: `0 0 10px ${building.accent}` }}
         />
         <span className="text-[11px] font-bold tracking-[0.18em] uppercase text-zinc-300">
           {building.name}
         </span>
         <span className="text-[10px] font-mono text-zinc-500">{building.code}</span>
+        {nodeCount > 0 && (
+          <span
+            className="text-[10px] font-mono px-1.5 py-0.5 rounded-full border"
+            style={{ color: building.accent, borderColor: `${building.accent}55`, background: `${building.accent}15` }}
+          >
+            {nodeCount}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -760,6 +794,10 @@ export default function HomePage() {
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = React.useRef({ x: 0, y: 0 });
+  // minZoom is updated dynamically to the fit-to-window zoom so the user
+  // cannot zoom out beyond seeing the full plant layout.
+  const minZoomRef = React.useRef(0.05);
+  const MAX_ZOOM = 30;
 
   useEffect(() => {
     const sb = createClient();
@@ -811,6 +849,15 @@ export default function HomePage() {
     return map;
   }, [computed, buildings]);
 
+  const nodesByBuilding = useMemo(() => {
+    const map = {};
+    for (const n of computed) {
+      if (!n.building) continue;
+      map[n.building] = (map[n.building] || 0) + 1;
+    }
+    return map;
+  }, [computed]);
+
   // Canvas dimensions derived from buildings extent (+ padding)
   const canvasDims = useMemo(() => {
     if (!buildings.length) return { w: 1360, h: 720 };
@@ -831,6 +878,8 @@ export default function HomePage() {
     const cw = el.clientWidth, ch = el.clientHeight;
     if (cw <= 0 || ch <= 0) return;
     const fz = Math.min(cw / canvasDims.w, ch / canvasDims.h) * 0.92;
+    // Update the dynamic minimum: user can never zoom out past this level
+    minZoomRef.current = fz;
     setZoom(fz);
     setOffset({
       x: (cw - canvasDims.w * fz) / 2,
@@ -871,7 +920,7 @@ export default function HomePage() {
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
     const delta = -e.deltaY * 0.0015;
-    const next = Math.max(0.05, Math.min(8, zoom * (1 + delta)));
+    const next = Math.max(minZoomRef.current, Math.min(MAX_ZOOM, zoom * (1 + delta)));
     const k = next / zoom;
     setOffset((o) => ({ x: mx - (mx - o.x) * k, y: my - (my - o.y) * k }));
     setZoom(next);
@@ -892,7 +941,7 @@ export default function HomePage() {
     const el = containerRef.current;
     if (!el) return;
     const cw = el.clientWidth, ch = el.clientHeight;
-    const next = Math.max(0.05, Math.min(8, zoom * factor));
+    const next = Math.max(minZoomRef.current, Math.min(MAX_ZOOM, zoom * factor));
     const k = next / zoom;
     setOffset((o) => ({ x: cw / 2 - (cw / 2 - o.x) * k, y: ch / 2 - (ch / 2 - o.y) * k }));
     setZoom(next);
@@ -972,6 +1021,8 @@ export default function HomePage() {
                     building={b}
                     hasFault={buildingStatus[b.code]?.hasFault}
                     hasAffected={buildingStatus[b.code]?.hasAffected}
+                    nodeCount={nodesByBuilding[b.code] || 0}
+                    zoom={zoom}
                   />
                 ))}
 
@@ -981,6 +1032,7 @@ export default function HomePage() {
                     node={node}
                     onSelect={(n) => setSelected(n)}
                     isSelected={selected?.id === node.id}
+                    zoom={zoom}
                   />
                 ))}
               </div>
@@ -1012,7 +1064,7 @@ export default function HomePage() {
                 Plant Blueprint · Sector A
               </div>
               <div className="text-[9px] font-mono text-zinc-700 mt-0.5">
-                Top-down view · 1 px = 15 cm · {nodes.length} objects · zoom {Math.round(zoom * 100)}%
+                Top-down view · 1 px = 15 cm · {nodes.length} objects · zoom {Math.round(zoom * 100)}% · max {MAX_ZOOM * 100}%
               </div>
             </div>
           </main>
