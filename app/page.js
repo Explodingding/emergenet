@@ -308,31 +308,76 @@ function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom }) {
   );
 }
 
+// Short labels for category filter pills
+const CAT_SHORT = {
+  power_source: 'POWER',
+  switching: 'SWITCH',
+  distribution: 'DIST',
+  control: 'CTRL',
+  consumer: 'CONS',
+  protection: 'UPS',
+  monitoring: 'MON',
+  passive: 'JB',
+};
+
 // =====================================================================
 // Fault simulator panel
 // =====================================================================
 function FaultPanel({ buildings, nodes, faultedIds, onInject, onClear, onSelect, selectedId, collapsed, onToggle }) {
   const [query, setQuery] = useState('');
+  const [activeBldg, setActiveBldg] = useState(null);   // building code filter
+  const [activeCat, setActiveCat] = useState(null);     // category filter
+  const [collapsedBldgs, setCollapsedBldgs] = useState(() => new Set());
+
+  // Buildings that actually have nodes on the current floor
+  const presentBuildings = useMemo(() => {
+    const codes = new Set(nodes.map((n) => n.building).filter(Boolean));
+    return buildings.filter((b) => codes.has(b.code));
+  }, [nodes, buildings]);
+
+  // Categories present in current node set
+  const presentCats = useMemo(() => {
+    const m = new Map();
+    for (const n of nodes) {
+      m.set(n.type_category, (m.get(n.type_category) || 0) + 1);
+    }
+    return m;
+  }, [nodes]);
+
+  // Apply all filters
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return nodes;
-    return nodes.filter(
-      (n) =>
+    return nodes.filter((n) => {
+      if (activeBldg && n.building !== activeBldg) return false;
+      if (activeCat && n.type_category !== activeCat) return false;
+      if (!q) return true;
+      return (
         n.name.toLowerCase().includes(q) ||
         n.id.toLowerCase().includes(q) ||
         n.type.includes(q) ||
         (n.type_label || '').toLowerCase().includes(q)
-    );
-  }, [nodes, query]);
+      );
+    });
+  }, [nodes, query, activeBldg, activeCat]);
 
+  // Group filtered nodes by building
   const grouped = useMemo(() => {
     const map = new Map();
-    for (const b of buildings) map.set(b.code, []);
+    for (const b of presentBuildings) map.set(b.code, []);
     for (const n of filtered) {
       if (map.has(n.building)) map.get(n.building).push(n);
     }
     return map;
-  }, [filtered, buildings]);
+  }, [filtered, presentBuildings]);
+
+  const toggleBldg = (code) =>
+    setCollapsedBldgs((prev) => {
+      const next = new Set(prev);
+      next.has(code) ? next.delete(code) : next.add(code);
+      return next;
+    });
+
+  const activeFilterCount = (activeBldg ? 1 : 0) + (activeCat ? 1 : 0) + (query ? 1 : 0);
 
   return (
     <motion.aside
@@ -357,96 +402,215 @@ function FaultPanel({ buildings, nodes, faultedIds, onInject, onClear, onSelect,
         </div>
       ) : (
         <>
-          <div className="px-5 pt-6 pb-4 border-b border-white/5">
-            <div className="flex items-center gap-2 mb-1">
-              <ShieldAlert className="text-orange-400" size={16} />
-              <h2 className="text-sm font-bold tracking-[0.18em] uppercase text-zinc-100">
+          {/* ── Header ── */}
+          <div className="px-4 pt-5 pb-3 border-b border-white/5 space-y-2.5">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="text-orange-400" size={15} />
+              <h2 className="text-[13px] font-bold tracking-[0.18em] uppercase text-zinc-100 flex-1">
                 Fault Simulator
               </h2>
+              {faultedIds.size > 0 && (
+                <span className="text-[10px] font-bold text-red-400 font-mono">
+                  {faultedIds.size}✕
+                </span>
+              )}
             </div>
-            <p className="text-[11px] text-zinc-500 leading-relaxed">
-              Inject a fault into any node. Downstream impact (obszar zagrożony) is calculated automatically.
-            </p>
-            <div className="mt-4 flex gap-2">
-              <Button
-                variant="destructive"
-                size="sm"
-                disabled={faultedIds.size === 0}
-                onClick={onClear}
-                className="flex-1 h-8 text-xs"
-              >
-                <RotateCcw size={13} className="mr-1.5" /> Clear All Faults
-              </Button>
-            </div>
-            <div className="mt-3 relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" size={13} />
+
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={faultedIds.size === 0}
+              onClick={onClear}
+              className="w-full h-7 text-xs"
+            >
+              <RotateCcw size={12} className="mr-1.5" /> Clear All Faults
+            </Button>
+
+            {/* Search */}
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" size={12} />
               <Input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search node by id, name or type"
-                className="pl-8 h-8 text-xs bg-zinc-900/70 border-white/10"
+                placeholder="Search id, name, type…"
+                className="pl-8 pr-7 h-7 text-xs bg-zinc-900/70 border-white/10"
               />
+              {query && (
+                <button
+                  onClick={() => setQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                >
+                  <X size={11} />
+                </button>
+              )}
             </div>
+
+            {/* Building filter pills */}
+            <div className="overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              <div className="flex gap-1 min-w-max pb-0.5">
+                <button
+                  onClick={() => setActiveBldg(null)}
+                  className={`h-6 px-2 rounded text-[10px] font-semibold transition-colors whitespace-nowrap ${
+                    !activeBldg
+                      ? 'bg-white/15 text-zinc-100'
+                      : 'bg-white/[0.04] text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.07]'
+                  }`}
+                >
+                  All <span className="font-mono opacity-60">({nodes.length})</span>
+                </button>
+                {presentBuildings.map((b) => {
+                  const cnt = nodes.filter((n) => n.building === b.code).length;
+                  const isActive = activeBldg === b.code;
+                  return (
+                    <button
+                      key={b.code}
+                      onClick={() => setActiveBldg((prev) => (prev === b.code ? null : b.code))}
+                      className="h-6 px-2 rounded text-[10px] font-semibold transition-all whitespace-nowrap"
+                      style={
+                        isActive
+                          ? { background: `${b.accent}25`, color: b.accent, border: `1px solid ${b.accent}50` }
+                          : { color: '#71717a', border: '1px solid transparent' }
+                      }
+                    >
+                      {b.code} <span className="font-mono opacity-60">({cnt})</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Category filter pills */}
+            {presentCats.size > 1 && (
+              <div className="overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                <div className="flex gap-1 min-w-max">
+                  <button
+                    onClick={() => setActiveCat(null)}
+                    className={`h-5 px-2 rounded text-[9px] font-mono transition-colors ${
+                      !activeCat ? 'bg-white/10 text-zinc-300' : 'text-zinc-600 hover:text-zinc-400'
+                    }`}
+                  >
+                    all
+                  </button>
+                  {[...presentCats.entries()].sort((a, b) => b[1] - a[1]).map(([cat, cnt]) => (
+                    <button
+                      key={cat}
+                      onClick={() => setActiveCat((prev) => (prev === cat ? null : cat))}
+                      className={`h-5 px-2 rounded text-[9px] font-mono transition-colors whitespace-nowrap ${
+                        activeCat === cat
+                          ? 'bg-white/10 text-zinc-200'
+                          : 'text-zinc-600 hover:text-zinc-400'
+                      }`}
+                    >
+                      {CAT_SHORT[cat] || cat} <span className="opacity-50">({cnt})</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
+          {/* Results summary strip */}
+          <div className="px-4 py-1 flex items-center gap-1.5 border-b border-white/5 text-[10px] text-zinc-500 bg-zinc-950/40">
+            <span className="font-mono text-zinc-300">{filtered.length}</span>
+            <span>of</span>
+            <span className="font-mono">{nodes.length}</span>
+            <span>objects</span>
+            {activeFilterCount > 0 && (
+              <button
+                onClick={() => { setActiveBldg(null); setActiveCat(null); setQuery(''); }}
+                className="ml-auto text-zinc-600 hover:text-zinc-400 flex items-center gap-0.5"
+              >
+                <X size={10} /> clear filters
+              </button>
+            )}
+          </div>
+
+          {/* ── Node list ── */}
           <ScrollArea className="flex-1 scrollbar-thin">
-            <div className="px-3 py-3 space-y-4">
-              {buildings.map((b) => {
+            <div className="px-3 py-2 space-y-1">
+              {presentBuildings.map((b) => {
                 const items = grouped.get(b.code) || [];
                 if (!items.length) return null;
+                const isColl = collapsedBldgs.has(b.code);
                 return (
                   <div key={b.code}>
-                    <div className="flex items-center gap-2 px-2 mb-2">
-                      <span className="h-1.5 w-1.5 rounded-full" style={{ background: b.accent }} />
-                      <span className="text-[10px] font-bold tracking-[0.16em] uppercase text-zinc-400">
+                    {/* Building header — click to collapse/expand */}
+                    <button
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-white/[0.03] transition-colors group/bldg"
+                      onClick={() => toggleBldg(b.code)}
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ background: b.accent }} />
+                      <span className="text-[10px] font-bold tracking-[0.14em] uppercase text-zinc-400 flex-1 text-left group-hover/bldg:text-zinc-300">
                         {b.name}
                       </span>
-                      <span className="text-[10px] text-zinc-600 font-mono">{items.length}</span>
-                    </div>
-                    <div className="space-y-1">
-                      {items.map((n) => {
-                        const Icon = iconFor(n.type_icon);
-                        const isFaulted = faultedIds.has(n.id);
-                        const isAffected = n.status === 'affected';
-                        return (
-                          <div
-                            key={n.id}
-                            className={`group flex items-center gap-2 px-2 py-1.5 rounded-md border cursor-pointer transition-colors ${
-                              selectedId === n.id
-                                ? 'bg-orange-500/10 border-orange-500/40'
-                                : isFaulted
-                                ? 'bg-red-500/10 border-red-500/40'
-                                : isAffected
-                                ? 'bg-amber-500/[0.06] border-amber-500/25'
-                                : 'border-transparent hover:bg-white/[0.03] hover:border-white/5'
-                            }`}
-                            onClick={() => onSelect(n)}
-                          >
-                            <Icon size={13} className={isFaulted ? 'text-red-400' : isAffected ? 'text-amber-400' : 'text-zinc-400'} />
-                            <div className="flex-1 min-w-0">
-                              <div className="text-[11px] font-medium text-zinc-200 truncate">{n.name}</div>
-                              <div className="text-[9px] text-zinc-500 font-mono">
-                                {n.id} · {n.type_label}
-                              </div>
-                            </div>
-                            <Button
-                              variant={isFaulted ? 'destructive' : 'outline'}
-                              size="sm"
-                              className="h-6 px-2 text-[10px] font-bold"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onInject(n.id);
-                              }}
+                      <span className="text-[9px] text-zinc-600 font-mono">{items.length}</span>
+                      <ChevronRight
+                        size={11}
+                        className={`text-zinc-600 transition-transform ${isColl ? '' : 'rotate-90'}`}
+                      />
+                    </button>
+
+                    {!isColl && (
+                      <div className="space-y-0.5 mb-1">
+                        {items.map((n) => {
+                          const Icon = iconFor(n.type_icon);
+                          const isFaulted = faultedIds.has(n.id);
+                          const isAffected = n.status === 'affected';
+                          return (
+                            <div
+                              key={n.id}
+                              className={`group flex items-center gap-2 px-2 py-1 rounded-md border cursor-pointer transition-colors ${
+                                selectedId === n.id
+                                  ? 'bg-orange-500/10 border-orange-500/40'
+                                  : isFaulted
+                                  ? 'bg-red-500/10 border-red-500/40'
+                                  : isAffected
+                                  ? 'bg-amber-500/[0.06] border-amber-500/25'
+                                  : 'border-transparent hover:bg-white/[0.03] hover:border-white/5'
+                              }`}
+                              onClick={() => onSelect(n)}
                             >
-                              {isFaulted ? (<><X size={10} className="mr-1" /> CLEAR</>) : (<><Zap size={10} className="mr-1" /> INJECT</>)}
-                            </Button>
-                          </div>
-                        );
-                      })}
-                    </div>
+                              <Icon
+                                size={12}
+                                className={`flex-shrink-0 ${isFaulted ? 'text-red-400' : isAffected ? 'text-amber-400' : 'text-zinc-500'}`}
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-[11px] font-medium text-zinc-200 truncate leading-tight">
+                                  {n.name}
+                                </div>
+                                <div className="text-[9px] text-zinc-600 font-mono">
+                                  {n.id} · {n.type_label}
+                                </div>
+                              </div>
+                              <Button
+                                variant={isFaulted ? 'destructive' : 'outline'}
+                                size="sm"
+                                className="h-5 px-1.5 text-[9px] font-bold flex-shrink-0"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onInject(n.id);
+                                }}
+                              >
+                                {isFaulted ? (
+                                  <><X size={9} className="mr-0.5" /> CLR</>
+                                ) : (
+                                  <><Zap size={9} className="mr-0.5" /> INJ</>
+                                )}
+                              </Button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 );
               })}
+
+              {filtered.length === 0 && (
+                <div className="py-8 text-center text-[11px] text-zinc-600">
+                  No objects match the current filters.
+                </div>
+              )}
             </div>
           </ScrollArea>
         </>
