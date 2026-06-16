@@ -35,6 +35,9 @@ import {
   LogOut,
   Database,
   RefreshCw,
+  Plus,
+  Minus,
+  Maximize2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -56,14 +59,14 @@ const iconFor = (name) => ICONS[name] || Box;
 
 // Visual size by category (px on canvas)
 const SIZE_BY_CATEGORY = {
-  power_source: 62,
-  switching: 56,
-  distribution: 50,
-  control: 46,
-  consumer: 42,
-  protection: 50,
-  monitoring: 38,
-  passive: 32,
+  power_source: 26,
+  switching: 24,
+  distribution: 22,
+  control: 20,
+  consumer: 20,
+  protection: 22,
+  monitoring: 18,
+  passive: 16,
 };
 
 const TROUBLESHOOT_STEPS = {
@@ -751,6 +754,13 @@ export default function HomePage() {
   const [collapsed, setCollapsed] = useState(false);
   const [user, setUser] = useState(null);
 
+  // Zoom / pan state
+  const containerRef = React.useRef(null);
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = React.useRef({ x: 0, y: 0 });
+
   useEffect(() => {
     const sb = createClient();
     sb.auth.getUser().then(({ data }) => setUser(data.user));
@@ -804,14 +814,89 @@ export default function HomePage() {
   // Canvas dimensions derived from buildings extent (+ padding)
   const canvasDims = useMemo(() => {
     if (!buildings.length) return { w: 1360, h: 720 };
-    let maxX = 0,
-      maxY = 0;
+    let minX = Infinity, minY = Infinity, maxX = 0, maxY = 0;
     for (const b of buildings) {
+      minX = Math.min(minX, b.bounds.x);
+      minY = Math.min(minY, b.bounds.y);
       maxX = Math.max(maxX, b.bounds.x + b.bounds.w);
       maxY = Math.max(maxY, b.bounds.y + b.bounds.h);
     }
-    return { w: Math.max(1360, Math.ceil(maxX + 60)), h: Math.max(720, Math.ceil(maxY + 80)) };
+    return { w: Math.ceil(maxX + 30), h: Math.ceil(maxY + 30) };
   }, [buildings]);
+
+  // Fit-to-window on initial load & when canvas size changes
+  const fitToWindow = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const cw = el.clientWidth, ch = el.clientHeight;
+    if (cw <= 0 || ch <= 0) return;
+    const fz = Math.min(cw / canvasDims.w, ch / canvasDims.h) * 0.92;
+    setZoom(fz);
+    setOffset({
+      x: (cw - canvasDims.w * fz) / 2,
+      y: (ch - canvasDims.h * fz) / 2,
+    });
+  }, [canvasDims]);
+
+  useEffect(() => {
+    if (loading || !buildings.length) return;
+    let canceled = false;
+    let tries = 0;
+    const tryFit = () => {
+      if (canceled) return;
+      const el = containerRef.current;
+      if (el && el.clientWidth > 50 && el.clientHeight > 50) {
+        fitToWindow();
+      } else if (tries++ < 30) {
+        setTimeout(tryFit, 50);
+      }
+    };
+    tryFit();
+    return () => {
+      canceled = true;
+    };
+  }, [loading, buildings.length, fitToWindow]);
+
+  useEffect(() => {
+    const onResize = () => fitToWindow();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [fitToWindow]);
+
+  const onWheel = useCallback((e) => {
+    e.preventDefault();
+    const el = containerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const delta = -e.deltaY * 0.0015;
+    const next = Math.max(0.05, Math.min(8, zoom * (1 + delta)));
+    const k = next / zoom;
+    setOffset((o) => ({ x: mx - (mx - o.x) * k, y: my - (my - o.y) * k }));
+    setZoom(next);
+  }, [zoom]);
+
+  const onMouseDown = useCallback((e) => {
+    if (e.button !== 0) return;
+    setIsDragging(true);
+    dragStartRef.current = { x: e.clientX - offset.x, y: e.clientY - offset.y };
+  }, [offset]);
+  const onMouseMove = useCallback((e) => {
+    if (!isDragging) return;
+    setOffset({ x: e.clientX - dragStartRef.current.x, y: e.clientY - dragStartRef.current.y });
+  }, [isDragging]);
+  const stopDrag = useCallback(() => setIsDragging(false), []);
+
+  const zoomBy = useCallback((factor) => {
+    const el = containerRef.current;
+    if (!el) return;
+    const cw = el.clientWidth, ch = el.clientHeight;
+    const next = Math.max(0.05, Math.min(8, zoom * factor));
+    const k = next / zoom;
+    setOffset((o) => ({ x: cw / 2 - (cw / 2 - o.x) * k, y: ch / 2 - (ch / 2 - o.y) * k }));
+    setZoom(next);
+  }, [zoom]);
 
   const signOut = async () => {
     await createClient().auth.signOut();
@@ -841,7 +926,7 @@ export default function HomePage() {
             onToggle={() => setCollapsed((c) => !c)}
           />
 
-          <main className="relative flex-1 overflow-auto">
+          <main className="relative flex-1 overflow-hidden">
             {loading && (
               <div className="absolute inset-0 z-30 flex items-center justify-center bg-zinc-950/70 backdrop-blur-sm">
                 <div className="flex items-center gap-3 text-zinc-300">
@@ -861,37 +946,73 @@ export default function HomePage() {
               </div>
             )}
 
+            {/* Pan/zoom viewport */}
             <div
-              className="relative blueprint-grid industrial-noise"
-              style={{ width: canvasDims.w, height: canvasDims.h, minWidth: '100%', minHeight: '100%' }}
+              ref={containerRef}
+              onWheel={onWheel}
+              onMouseDown={onMouseDown}
+              onMouseMove={onMouseMove}
+              onMouseUp={stopDrag}
+              onMouseLeave={stopDrag}
+              className={`absolute inset-0 overflow-hidden ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+              style={{ touchAction: 'none' }}
             >
-              {buildings.map((b) => (
-                <BuildingZone
-                  key={b.code}
-                  building={b}
-                  hasFault={buildingStatus[b.code]?.hasFault}
-                  hasAffected={buildingStatus[b.code]?.hasAffected}
-                />
-              ))}
+              <div
+                className="relative blueprint-grid industrial-noise origin-top-left"
+                style={{
+                  width: canvasDims.w,
+                  height: canvasDims.h,
+                  transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`,
+                  willChange: 'transform',
+                }}
+              >
+                {buildings.map((b) => (
+                  <BuildingZone
+                    key={b.code}
+                    building={b}
+                    hasFault={buildingStatus[b.code]?.hasFault}
+                    hasAffected={buildingStatus[b.code]?.hasAffected}
+                  />
+                ))}
 
-              {computed.map((node) => (
-                <NodeMarker
-                  key={node.id}
-                  node={node}
-                  onSelect={(n) => setSelected(n)}
-                  isSelected={selected?.id === node.id}
-                />
-              ))}
+                {computed.map((node) => (
+                  <NodeMarker
+                    key={node.id}
+                    node={node}
+                    onSelect={(n) => setSelected(n)}
+                    isSelected={selected?.id === node.id}
+                  />
+                ))}
+              </div>
+            </div>
 
-              <Legend />
+            {/* Legend (fixed, outside transform) */}
+            <Legend />
 
-              <div className="absolute top-4 right-6 text-right pointer-events-none">
-                <div className="text-[10px] font-bold tracking-[0.3em] uppercase text-zinc-600">
-                  Plant Blueprint · Sector A
-                </div>
-                <div className="text-[9px] font-mono text-zinc-700 mt-0.5">
-                  Top-down view · 1 px = 15 cm · {nodes.length} objects
-                </div>
+            {/* Zoom controls */}
+            <div className="absolute bottom-4 right-4 z-20 flex flex-col gap-1 bg-zinc-950/85 backdrop-blur-xl border border-white/10 rounded-lg p-1 shadow-2xl">
+              <button onClick={() => zoomBy(1.25)} className="h-8 w-8 rounded-md hover:bg-white/5 text-zinc-200 flex items-center justify-center" title="Zoom in (scroll up)">
+                <Plus size={14} />
+              </button>
+              <button onClick={() => zoomBy(0.8)} className="h-8 w-8 rounded-md hover:bg-white/5 text-zinc-200 flex items-center justify-center" title="Zoom out (scroll down)">
+                <Minus size={14} />
+              </button>
+              <div className="h-px bg-white/5 my-0.5" />
+              <button onClick={fitToWindow} className="h-8 w-8 rounded-md hover:bg-white/5 text-zinc-200 flex items-center justify-center" title="Fit to window">
+                <Maximize2 size={14} />
+              </button>
+              <div className="text-[9px] text-zinc-500 font-mono text-center pt-1 pb-0.5">
+                {Math.round(zoom * 100)}%
+              </div>
+            </div>
+
+            {/* Watermark */}
+            <div className="absolute top-4 right-6 text-right pointer-events-none z-10">
+              <div className="text-[10px] font-bold tracking-[0.3em] uppercase text-zinc-600">
+                Plant Blueprint · Sector A
+              </div>
+              <div className="text-[9px] font-mono text-zinc-700 mt-0.5">
+                Top-down view · 1 px = 15 cm · {nodes.length} objects · zoom {Math.round(zoom * 100)}%
               </div>
             </div>
           </main>
