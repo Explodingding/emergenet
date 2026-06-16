@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import Link from 'next/link';
 import {
   AlertTriangle,
   Zap,
@@ -18,9 +19,22 @@ import {
   Gauge,
   Wrench,
   ShieldAlert,
+  ShieldCheck,
   CheckCircle2,
   X,
   Radio,
+  Fuel,
+  BatteryFull,
+  LayoutPanelTop,
+  Cog,
+  Flame,
+  Lightbulb,
+  Square,
+  Loader2,
+  LogIn,
+  LogOut,
+  Database,
+  RefreshCw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -28,46 +42,104 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { BUILDINGS, INITIAL_NODES } from '@/lib/network-data';
-import { computeNetworkStatus, downstreamOf, TYPE_LABEL } from '@/lib/network-utils';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import { computeNetworkStatus, downstreamOf } from '@/lib/network-utils';
+import { useNetworkTopology } from '@/hooks/useNetworkTopology';
+import { createClient } from '@/lib/supabase/client';
 
-const TYPE_ICON = {
-  transformer: Zap,
-  switchgear: CircuitBoard,
-  distribution: Cpu,
-  cabinet: Box,
+// Icon registry: map icon name string -> lucide component
+const ICONS = {
+  Zap, CircuitBoard, Cpu, Box, Gauge, ShieldCheck, Fuel, BatteryFull,
+  LayoutPanelTop, Cog, Flame, Lightbulb, Square, Activity, Power,
+};
+const iconFor = (name) => ICONS[name] || Box;
+
+// Visual size by category (px on canvas)
+const SIZE_BY_CATEGORY = {
+  power_source: 62,
+  switching: 56,
+  distribution: 50,
+  control: 46,
+  consumer: 42,
+  protection: 50,
+  monitoring: 38,
+  passive: 32,
+};
+
+const TROUBLESHOOT_STEPS = {
+  power_source: [
+    'Verify primary and secondary voltage with a calibrated meter.',
+    'Inspect cooling system (oil level / fans) and temperature sensors.',
+    'Check Buchholz / sudden pressure relay status.',
+    'Review insulation resistance (IR) and dissolved gas analysis (DGA) trend.',
+    'Confirm protection relay trip history and reset breaker if safe.',
+  ],
+  switching: [
+    'Confirm SCADA / HMI alarm log and breaker position.',
+    'Verify trip unit / protection relay settings and target.',
+    'Inspect bus voltage and current readings against nominal.',
+    'Perform thermal scan on busbar connections and lugs.',
+    'Coordinate lock-out / tag-out before manual reset.',
+  ],
+  distribution: [
+    'Identify which feeder breaker tripped or shows alarm.',
+    'Measure incoming and outgoing voltage at the busbar.',
+    'Inspect MCBs / MCCBs for visible signs of overload or arc.',
+    'Verify neutral and earth bonding integrity.',
+    'Reset breakers sequentially while monitoring load currents.',
+  ],
+  control: [
+    'Read PLC / drive diagnostic codes from HMI.',
+    'Verify 24 V control voltage and digital input states.',
+    'Inspect interlock chain and emergency stop loop.',
+    'Confirm communication network status (PROFINET / Modbus).',
+    'Replace failed module after isolating and verifying spare.',
+  ],
+  consumer: [
+    'Check local indicator lights and emergency stop status.',
+    'Inspect MCB / contactor status inside the cabinet.',
+    'Measure motor / heater terminal voltage and current draw.',
+    'Verify thermal protection and overload relay state.',
+    'Test interlocks with upstream feeder before energising.',
+  ],
+  protection: [
+    'Check battery state of charge and inverter status LEDs.',
+    'Run UPS / protection self-test from the front panel.',
+    'Verify bypass switch position and source availability.',
+    'Review event log for recent transfers or alarms.',
+    'Confirm grounding and shielding of protected loads.',
+  ],
+  monitoring: [
+    'Verify meter / sensor communication (Modbus / 4-20 mA).',
+    'Cross-check measured values against a portable reference.',
+    'Inspect CT / VT connections and burden.',
+    'Review historian trend for anomalies.',
+    'Recalibrate or replace the device if drift exceeds tolerance.',
+  ],
+  passive: [
+    'Open the junction box and verify torque on all terminals.',
+    'Inspect insulation for thermal damage or moisture ingress.',
+    'Check earth continuity and shield bonding.',
+    'Confirm cable IDs match drawings.',
+    'Reseal and label after work.',
+  ],
 };
 
 // =====================================================================
-// Node marker — physical component on the top-down map
+// Node marker
 // =====================================================================
 function NodeMarker({ node, onSelect, isSelected }) {
-  const Icon = TYPE_ICON[node.type] || Box;
+  const Icon = iconFor(node.type_icon);
   const isFault = node.status === 'fault';
   const isAffected = node.status === 'affected';
 
-  // Sizing per type — transformers larger, cabinets smaller
-  const size =
-    node.type === 'transformer' ? 64 : node.type === 'switchgear' ? 58 : node.type === 'distribution' ? 50 : 44;
+  const size = node.width
+    ? Math.max(28, Math.round(node.width / 10))
+    : SIZE_BY_CATEGORY[node.type_category] || 44;
 
-  const baseRing = isFault
-    ? 'ring-red-500'
-    : isAffected
-    ? 'ring-amber-500/70'
-    : 'ring-emerald-500/40';
-
-  const baseBg = isFault
-    ? 'bg-red-950/80'
-    : isAffected
-    ? 'bg-amber-950/60'
-    : 'bg-zinc-900/80';
-
-  const iconColor = isFault
-    ? 'text-red-400'
-    : isAffected
-    ? 'text-amber-400'
-    : 'text-emerald-400';
+  const baseRing = isFault ? 'ring-red-500' : isAffected ? 'ring-amber-500/70' : 'ring-emerald-500/40';
+  const baseBg = isFault ? 'bg-red-950/80' : isAffected ? 'bg-amber-950/60' : 'bg-zinc-900/80';
+  const iconColor = isFault ? 'text-red-400' : isAffected ? 'text-amber-400' : 'text-emerald-400';
 
   return (
     <motion.button
@@ -83,9 +155,9 @@ function NodeMarker({ node, onSelect, isSelected }) {
         top: node.coordinates.y,
         width: size,
         height: size,
+        transform: `translate(-50%, -50%) rotate(${node.rotation || 0}deg)`,
       }}
     >
-      {/* Aggressive red pulse for actual fault root cause */}
       {isFault && (
         <>
           <motion.span
@@ -105,8 +177,6 @@ function NodeMarker({ node, onSelect, isSelected }) {
           />
         </>
       )}
-
-      {/* Ambient amber glow for affected nodes */}
       {isAffected && (
         <motion.span
           className="absolute inset-0 rounded-xl shadow-[0_0_22px_2px_rgba(245,158,11,0.35)]"
@@ -115,23 +185,24 @@ function NodeMarker({ node, onSelect, isSelected }) {
         />
       )}
 
-      <Icon className={`relative z-10 ${iconColor}`} size={node.type === 'cabinet' ? 18 : 22} />
-      <span className="relative z-10 text-[9px] font-semibold text-zinc-300 leading-none tracking-wide">
-        {node.id}
-      </span>
+      <div
+        className="relative z-10 flex flex-col items-center justify-center gap-1"
+        style={{ transform: `rotate(${-(node.rotation || 0)}deg)` }}
+      >
+        <Icon className={iconColor} size={size > 50 ? 22 : 18} />
+        <span className="text-[9px] font-semibold text-zinc-300 leading-none tracking-wide">
+          {node.id}
+        </span>
+      </div>
 
-      {/* Status indicator dot */}
       <span
         className={`absolute -top-1.5 -right-1.5 h-3 w-3 rounded-full border border-zinc-950 ${
           isFault ? 'bg-red-500' : isAffected ? 'bg-amber-500' : 'bg-emerald-500'
         }`}
       />
-
-      {/* Hover label */}
       <span className="pointer-events-none absolute top-full mt-2 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-medium text-zinc-300 bg-zinc-950/90 border border-white/10 px-2 py-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity z-20">
         {node.name}
       </span>
-
       {isSelected && (
         <span className="absolute -inset-1.5 rounded-2xl border-2 border-orange-400 pointer-events-none" />
       )}
@@ -140,7 +211,7 @@ function NodeMarker({ node, onSelect, isSelected }) {
 }
 
 // =====================================================================
-// Building zone — visual block (rooms) on the blueprint
+// Building zone
 // =====================================================================
 function BuildingZone({ building, hasFault, hasAffected }) {
   const { bounds } = building;
@@ -149,28 +220,18 @@ function BuildingZone({ building, hasFault, hasAffected }) {
       className="absolute rounded-2xl pointer-events-none"
       style={{ left: bounds.x, top: bounds.y, width: bounds.w, height: bounds.h }}
     >
-      {/* base shell */}
       <div
         className={`absolute inset-0 rounded-2xl border-2 ${
-          hasFault
-            ? 'border-red-500/50'
-            : hasAffected
-            ? 'border-amber-500/40'
-            : 'border-zinc-700/60'
+          hasFault ? 'border-red-500/50' : hasAffected ? 'border-amber-500/40' : 'border-zinc-700/60'
         } bg-zinc-900/30 backdrop-blur-[2px]`}
       />
-      {/* endangered area overlay */}
       <AnimatePresence>
         {(hasFault || hasAffected) && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className={`absolute inset-0 rounded-2xl ${
-              hasFault
-                ? 'bg-red-500/[0.06]'
-                : 'bg-amber-500/[0.06]'
-            }`}
+            className={`absolute inset-0 rounded-2xl ${hasFault ? 'bg-red-500/[0.06]' : 'bg-amber-500/[0.06]'}`}
           >
             <div
               className="absolute inset-0 rounded-2xl opacity-30"
@@ -183,20 +244,14 @@ function BuildingZone({ building, hasFault, hasAffected }) {
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* corner brackets */}
-      {['top-2 left-2', 'top-2 right-2 rotate-90', 'bottom-2 left-2 -rotate-90', 'bottom-2 right-2 rotate-180'].map(
-        (pos) => (
-          <div
-            key={pos}
-            className={`absolute ${pos} h-4 w-4 border-t-2 border-l-2 ${
-              hasFault ? 'border-red-400/70' : hasAffected ? 'border-amber-400/70' : 'border-zinc-500/70'
-            }`}
-          />
-        )
-      )}
-
-      {/* Label */}
+      {['top-2 left-2', 'top-2 right-2 rotate-90', 'bottom-2 left-2 -rotate-90', 'bottom-2 right-2 rotate-180'].map((pos) => (
+        <div
+          key={pos}
+          className={`absolute ${pos} h-4 w-4 border-t-2 border-l-2 ${
+            hasFault ? 'border-red-400/70' : hasAffected ? 'border-amber-400/70' : 'border-zinc-500/70'
+          }`}
+        />
+      ))}
       <div className="absolute top-3 left-4 flex items-center gap-2">
         <div
           className="h-2 w-2 rounded-full"
@@ -214,24 +269,28 @@ function BuildingZone({ building, hasFault, hasAffected }) {
 // =====================================================================
 // Fault simulator panel
 // =====================================================================
-function FaultPanel({ nodes, faultedIds, onInject, onClear, onSelect, selectedId, collapsed, onToggle }) {
+function FaultPanel({ buildings, nodes, faultedIds, onInject, onClear, onSelect, selectedId, collapsed, onToggle }) {
   const [query, setQuery] = useState('');
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return nodes;
     return nodes.filter(
-      (n) => n.name.toLowerCase().includes(q) || n.id.toLowerCase().includes(q) || n.type.includes(q)
+      (n) =>
+        n.name.toLowerCase().includes(q) ||
+        n.id.toLowerCase().includes(q) ||
+        n.type.includes(q) ||
+        (n.type_label || '').toLowerCase().includes(q)
     );
   }, [nodes, query]);
 
   const grouped = useMemo(() => {
     const map = new Map();
-    for (const b of BUILDINGS) map.set(b.id, []);
+    for (const b of buildings) map.set(b.code, []);
     for (const n of filtered) {
       if (map.has(n.building)) map.get(n.building).push(n);
     }
     return map;
-  }, [filtered]);
+  }, [filtered, buildings]);
 
   return (
     <motion.aside
@@ -252,9 +311,7 @@ function FaultPanel({ nodes, faultedIds, onInject, onClear, onSelect, selectedId
           <span className="text-[10px] font-bold tracking-widest text-zinc-500 [writing-mode:vertical-rl] rotate-180">
             FAULT SIMULATOR
           </span>
-          {faultedIds.size > 0 && (
-            <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
-          )}
+          {faultedIds.size > 0 && <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />}
         </div>
       ) : (
         <>
@@ -292,16 +349,13 @@ function FaultPanel({ nodes, faultedIds, onInject, onClear, onSelect, selectedId
 
           <ScrollArea className="flex-1 scrollbar-thin">
             <div className="px-3 py-3 space-y-4">
-              {BUILDINGS.map((b) => {
-                const items = grouped.get(b.id) || [];
+              {buildings.map((b) => {
+                const items = grouped.get(b.code) || [];
                 if (!items.length) return null;
                 return (
-                  <div key={b.id}>
+                  <div key={b.code}>
                     <div className="flex items-center gap-2 px-2 mb-2">
-                      <span
-                        className="h-1.5 w-1.5 rounded-full"
-                        style={{ background: b.accent }}
-                      />
+                      <span className="h-1.5 w-1.5 rounded-full" style={{ background: b.accent }} />
                       <span className="text-[10px] font-bold tracking-[0.16em] uppercase text-zinc-400">
                         {b.name}
                       </span>
@@ -309,7 +363,7 @@ function FaultPanel({ nodes, faultedIds, onInject, onClear, onSelect, selectedId
                     </div>
                     <div className="space-y-1">
                       {items.map((n) => {
-                        const Icon = TYPE_ICON[n.type] || Box;
+                        const Icon = iconFor(n.type_icon);
                         const isFaulted = faultedIds.has(n.id);
                         const isAffected = n.status === 'affected';
                         return (
@@ -326,22 +380,11 @@ function FaultPanel({ nodes, faultedIds, onInject, onClear, onSelect, selectedId
                             }`}
                             onClick={() => onSelect(n)}
                           >
-                            <Icon
-                              size={13}
-                              className={
-                                isFaulted
-                                  ? 'text-red-400'
-                                  : isAffected
-                                  ? 'text-amber-400'
-                                  : 'text-zinc-400'
-                              }
-                            />
+                            <Icon size={13} className={isFaulted ? 'text-red-400' : isAffected ? 'text-amber-400' : 'text-zinc-400'} />
                             <div className="flex-1 min-w-0">
-                              <div className="text-[11px] font-medium text-zinc-200 truncate">
-                                {n.name}
-                              </div>
+                              <div className="text-[11px] font-medium text-zinc-200 truncate">{n.name}</div>
                               <div className="text-[9px] text-zinc-500 font-mono">
-                                {n.id} · {TYPE_LABEL[n.type]}
+                                {n.id} · {n.type_label}
                               </div>
                             </div>
                             <Button
@@ -353,15 +396,7 @@ function FaultPanel({ nodes, faultedIds, onInject, onClear, onSelect, selectedId
                                 onInject(n.id);
                               }}
                             >
-                              {isFaulted ? (
-                                <>
-                                  <X size={10} className="mr-1" /> CLEAR
-                                </>
-                              ) : (
-                                <>
-                                  <Zap size={10} className="mr-1" /> INJECT
-                                </>
-                              )}
+                              {isFaulted ? (<><X size={10} className="mr-1" /> CLEAR</>) : (<><Zap size={10} className="mr-1" /> INJECT</>)}
                             </Button>
                           </div>
                         );
@@ -379,29 +414,31 @@ function FaultPanel({ nodes, faultedIds, onInject, onClear, onSelect, selectedId
 }
 
 // =====================================================================
-// Node detail drawer
+// Node drawer
 // =====================================================================
 function NodeDrawer({ node, allNodes, faultedIds, onInject, onClear, onOpenChange }) {
   if (!node) return null;
   const current = allNodes.find((n) => n.id === node.id) || node;
-  const Icon = TYPE_ICON[current.type] || Box;
+  const Icon = iconFor(current.type_icon);
   const parents = (current.dependsOn || []).map((id) => allNodes.find((n) => n.id === id)).filter(Boolean);
   const downstreamIds = downstreamOf(allNodes, current.id);
   const downstream = downstreamIds.map((id) => allNodes.find((n) => n.id === id)).filter(Boolean);
   const isFaulted = faultedIds.has(current.id);
+  const controls = (current.controlsTargets || []).map((id) => allNodes.find((n) => n.id === id)).filter(Boolean);
+  const controlledBy = (current.controlledBy || []).map((id) => allNodes.find((n) => n.id === id)).filter(Boolean);
+  const backedUpBy = (current.backedUpBy || []).map((id) => allNodes.find((n) => n.id === id)).filter(Boolean);
+  const backupFor = (current.backupFor || []).map((id) => allNodes.find((n) => n.id === id)).filter(Boolean);
 
   const statusColor =
-    current.status === 'fault'
-      ? 'text-red-400'
-      : current.status === 'affected'
-      ? 'text-amber-400'
-      : 'text-emerald-400';
+    current.status === 'fault' ? 'text-red-400' : current.status === 'affected' ? 'text-amber-400' : 'text-emerald-400';
+
+  const steps = TROUBLESHOOT_STEPS[current.type_category] || TROUBLESHOOT_STEPS.control;
 
   return (
     <Sheet open={!!node} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-[420px] sm:max-w-[460px] bg-zinc-950/95 border-l border-white/5 text-zinc-100 backdrop-blur-xl p-0"
+        className="w-[440px] sm:max-w-[480px] bg-zinc-950/95 border-l border-white/5 text-zinc-100 backdrop-blur-xl p-0"
       >
         <SheetHeader className="p-6 pb-4 border-b border-white/5">
           <div className="flex items-center gap-3">
@@ -419,11 +456,11 @@ function NodeDrawer({ node, allNodes, faultedIds, onInject, onClear, onOpenChang
             <div className="flex-1 min-w-0">
               <SheetTitle className="text-zinc-100 text-base leading-tight">{current.name}</SheetTitle>
               <SheetDescription className="font-mono text-[11px] text-zinc-500">
-                {current.id} · {TYPE_LABEL[current.type]}
+                {current.id} · {current.type_label}
               </SheetDescription>
             </div>
           </div>
-          <div className="mt-4 flex items-center gap-2">
+          <div className="mt-4 flex items-center gap-2 flex-wrap">
             <Badge
               className={`uppercase tracking-widest text-[10px] font-bold ${
                 current.status === 'fault'
@@ -437,17 +474,19 @@ function NodeDrawer({ node, allNodes, faultedIds, onInject, onClear, onOpenChang
               {current.status}
             </Badge>
             <Badge variant="outline" className="text-[10px] border-white/10 text-zinc-400">
-              {BUILDINGS.find((b) => b.id === current.building)?.name}
+              {current.building_name}
             </Badge>
             <Badge variant="outline" className="text-[10px] border-white/10 text-zinc-400">
               {current.floor}
+            </Badge>
+            <Badge variant="outline" className="text-[10px] border-white/10 text-zinc-500">
+              rot {current.rotation}°
             </Badge>
           </div>
         </SheetHeader>
 
         <ScrollArea className="h-[calc(100vh-180px)] scrollbar-thin">
           <div className="p-6 space-y-5">
-            {/* Action */}
             <div className="flex gap-2">
               {isFaulted ? (
                 <Button onClick={() => onClear(current.id)} variant="outline" className="flex-1 border-white/10">
@@ -460,20 +499,30 @@ function NodeDrawer({ node, allNodes, faultedIds, onInject, onClear, onOpenChang
               )}
             </div>
 
-            {/* Specs */}
             <section>
               <h3 className="text-[10px] font-bold tracking-[0.18em] uppercase text-zinc-500 mb-2 flex items-center gap-1.5">
                 <Gauge size={11} /> Specifications
               </h3>
               <div className="grid grid-cols-2 gap-2 text-[12px]">
+                <SpecBox label="Type" value={current.type_label} />
+                <SpecBox label="Category" value={current.type_category} />
                 <SpecBox label="Rating" value={current.rating || '—'} />
                 <SpecBox label="Voltage" value={current.voltage || '—'} />
-                <SpecBox label="Type" value={TYPE_LABEL[current.type]} />
+                <SpecBox label="Position" value={`${current.coord_cm.x}, ${current.coord_cm.y} cm`} />
                 <SpecBox label="Installed" value={current.installed || '—'} />
               </div>
+              {current.properties && Object.keys(current.properties).length > 0 && (
+                <details className="mt-2 group">
+                  <summary className="text-[10px] uppercase tracking-widest text-zinc-500 cursor-pointer hover:text-zinc-300">
+                    All properties
+                  </summary>
+                  <pre className="mt-2 text-[10px] text-zinc-400 bg-black/40 border border-white/5 rounded p-2 overflow-auto">
+                    {JSON.stringify(current.properties, null, 2)}
+                  </pre>
+                </details>
+              )}
             </section>
 
-            {/* Upstream */}
             <section>
               <h3 className="text-[10px] font-bold tracking-[0.18em] uppercase text-zinc-500 mb-2 flex items-center gap-1.5">
                 <Power size={11} /> Upstream Power Source
@@ -482,14 +531,55 @@ function NodeDrawer({ node, allNodes, faultedIds, onInject, onClear, onOpenChang
                 <div className="text-[11px] text-zinc-500 italic">Grid feed / root node</div>
               ) : (
                 <div className="space-y-1.5">
-                  {parents.map((p) => (
-                    <DependencyRow key={p.id} node={p} />
-                  ))}
+                  {parents.map((p) => (<DependencyRow key={p.id} node={p} />))}
                 </div>
               )}
             </section>
 
-            {/* Downstream impact */}
+            {backedUpBy.length > 0 && (
+              <section>
+                <h3 className="text-[10px] font-bold tracking-[0.18em] uppercase text-blue-400/80 mb-2 flex items-center gap-1.5">
+                  <ShieldCheck size={11} /> Backup Sources
+                </h3>
+                <div className="space-y-1.5">
+                  {backedUpBy.map((p) => (<DependencyRow key={p.id} node={p} tone="blue" />))}
+                </div>
+              </section>
+            )}
+
+            {controlledBy.length > 0 && (
+              <section>
+                <h3 className="text-[10px] font-bold tracking-[0.18em] uppercase text-purple-400/80 mb-2 flex items-center gap-1.5">
+                  <Cpu size={11} /> Controlled By
+                </h3>
+                <div className="space-y-1.5">
+                  {controlledBy.map((p) => (<DependencyRow key={p.id} node={p} tone="purple" />))}
+                </div>
+              </section>
+            )}
+
+            {controls.length > 0 && (
+              <section>
+                <h3 className="text-[10px] font-bold tracking-[0.18em] uppercase text-purple-400/80 mb-2 flex items-center gap-1.5">
+                  <Cpu size={11} /> Controls ({controls.length})
+                </h3>
+                <div className="space-y-1.5">
+                  {controls.map((p) => (<DependencyRow key={p.id} node={p} tone="purple" />))}
+                </div>
+              </section>
+            )}
+
+            {backupFor.length > 0 && (
+              <section>
+                <h3 className="text-[10px] font-bold tracking-[0.18em] uppercase text-blue-400/80 mb-2 flex items-center gap-1.5">
+                  <ShieldCheck size={11} /> Backup For
+                </h3>
+                <div className="space-y-1.5">
+                  {backupFor.map((p) => (<DependencyRow key={p.id} node={p} tone="blue" />))}
+                </div>
+              </section>
+            )}
+
             <section>
               <h3 className="text-[10px] font-bold tracking-[0.18em] uppercase text-zinc-500 mb-2 flex items-center gap-1.5">
                 <Activity size={11} /> Downstream Impact ({downstream.length})
@@ -505,13 +595,12 @@ function NodeDrawer({ node, allNodes, faultedIds, onInject, onClear, onOpenChang
               )}
             </section>
 
-            {/* Troubleshooting */}
             <section>
               <h3 className="text-[10px] font-bold tracking-[0.18em] uppercase text-zinc-500 mb-2 flex items-center gap-1.5">
                 <Wrench size={11} /> Troubleshooting Steps
               </h3>
               <ol className="space-y-2 text-[12px] text-zinc-300">
-                {TROUBLESHOOT_STEPS[current.type].map((step, i) => (
+                {steps.map((step, i) => (
                   <li key={i} className="flex gap-3">
                     <span className="shrink-0 h-5 w-5 rounded bg-orange-500/15 text-orange-300 text-[10px] font-bold flex items-center justify-center">
                       {i + 1}
@@ -532,76 +621,40 @@ function SpecBox({ label, value }) {
   return (
     <div className="rounded-md border border-white/5 bg-white/[0.02] px-3 py-2">
       <div className="text-[9px] text-zinc-500 uppercase tracking-widest">{label}</div>
-      <div className="text-[12px] text-zinc-200 font-medium mt-0.5">{value}</div>
+      <div className="text-[12px] text-zinc-200 font-medium mt-0.5 break-words">{value}</div>
     </div>
   );
 }
 
-function DependencyRow({ node, highlight }) {
-  const Icon = TYPE_ICON[node.type] || Box;
-  const tone =
-    node.status === 'fault'
-      ? 'border-red-500/30 bg-red-500/[0.06] text-red-200'
-      : node.status === 'affected'
-      ? 'border-amber-500/30 bg-amber-500/[0.06] text-amber-200'
-      : highlight
-      ? 'border-amber-500/20 bg-amber-500/[0.04] text-zinc-200'
-      : 'border-white/5 bg-white/[0.02] text-zinc-300';
+function DependencyRow({ node, highlight, tone }) {
+  const Icon = iconFor(node.type_icon);
+  let cls;
+  if (tone === 'purple') cls = 'border-purple-500/25 bg-purple-500/[0.05] text-purple-100';
+  else if (tone === 'blue') cls = 'border-blue-500/25 bg-blue-500/[0.05] text-blue-100';
+  else if (node.status === 'fault') cls = 'border-red-500/30 bg-red-500/[0.06] text-red-200';
+  else if (node.status === 'affected') cls = 'border-amber-500/30 bg-amber-500/[0.06] text-amber-200';
+  else if (highlight) cls = 'border-amber-500/20 bg-amber-500/[0.04] text-zinc-200';
+  else cls = 'border-white/5 bg-white/[0.02] text-zinc-300';
   return (
-    <div className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md border ${tone}`}>
+    <div className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md border ${cls}`}>
       <Icon size={13} />
       <div className="flex-1 min-w-0">
         <div className="text-[11px] font-medium truncate">{node.name}</div>
-        <div className="text-[9px] text-zinc-500 font-mono">{node.id} · {TYPE_LABEL[node.type]}</div>
+        <div className="text-[9px] text-zinc-500 font-mono">{node.id} · {node.type_label}</div>
       </div>
       <span
         className={`h-1.5 w-1.5 rounded-full ${
-          node.status === 'fault'
-            ? 'bg-red-500'
-            : node.status === 'affected'
-            ? 'bg-amber-500'
-            : 'bg-emerald-500'
+          node.status === 'fault' ? 'bg-red-500' : node.status === 'affected' ? 'bg-amber-500' : 'bg-emerald-500'
         }`}
       />
     </div>
   );
 }
 
-const TROUBLESHOOT_STEPS = {
-  transformer: [
-    'Verify primary and secondary voltage with calibrated meter.',
-    'Inspect cooling system (oil level / fans) and temperature sensors.',
-    'Check Buchholz / sudden pressure relay status.',
-    'Review insulation resistance (IR) and dissolved gas analysis (DGA) trend.',
-    'Confirm protection relay trip history and reset breaker if safe.',
-  ],
-  switchgear: [
-    'Confirm SCADA / HMI alarm log and breaker position.',
-    'Verify trip unit / protection relay settings and target.',
-    'Inspect bus voltage and current readings against nominal.',
-    'Perform thermal scan on busbar connections and lugs.',
-    'Coordinate lock-out / tag-out before manual reset.',
-  ],
-  distribution: [
-    'Identify which feeder breaker tripped or shows alarm.',
-    'Measure incoming and outgoing voltage at the busbar.',
-    'Inspect MCBs / MCCBs for visible signs of overload or arc.',
-    'Verify neutral and earth bonding integrity.',
-    'Reset breakers sequentially while monitoring load currents.',
-  ],
-  cabinet: [
-    'Check local indicator lights and emergency stop status.',
-    'Inspect MCB / contactor status inside the cabinet.',
-    'Measure control voltage (24V / 230V) at PLC input.',
-    'Verify drive / soft-starter fault codes if present.',
-    'Test interlocks with upstream feeder before energising.',
-  ],
-};
-
 // =====================================================================
-// Top status bar
+// Top status bar with auth
 // =====================================================================
-function StatusBar({ stats }) {
+function StatusBar({ stats, user, onSignOut, onRefresh, refreshing }) {
   return (
     <div className="h-14 shrink-0 bg-zinc-950/80 backdrop-blur-xl border-b border-white/5 flex items-center px-6 gap-6">
       <div className="flex items-center gap-2.5">
@@ -609,43 +662,42 @@ function StatusBar({ stats }) {
           <Factory size={16} className="text-white" />
         </div>
         <div>
-          <div className="text-[11px] font-bold tracking-[0.2em] uppercase text-zinc-100 leading-none">
-            Plant Electrical
-          </div>
-          <div className="text-[9px] text-zinc-500 font-mono leading-none mt-1">
-            TROUBLESHOOT · v1.0
-          </div>
+          <div className="text-[11px] font-bold tracking-[0.2em] uppercase text-zinc-100 leading-none">Plant Electrical</div>
+          <div className="text-[9px] text-zinc-500 font-mono leading-none mt-1">TROUBLESHOOT · v2.0 · SUPABASE</div>
         </div>
       </div>
       <Separator orientation="vertical" className="h-8 bg-white/5" />
 
-      <StatPill
-        label="Operational"
-        value={stats.operational}
-        color="emerald"
-        icon={<CheckCircle2 size={12} />}
-      />
-      <StatPill
-        label="Affected"
-        value={stats.affected}
-        color="amber"
-        icon={<AlertTriangle size={12} />}
-      />
-      <StatPill
-        label="Fault"
-        value={stats.fault}
-        color="red"
-        icon={<Radio size={12} className={stats.fault > 0 ? 'animate-pulse' : ''} />}
-      />
+      <StatPill label="Operational" value={stats.operational} color="emerald" icon={<CheckCircle2 size={12} />} />
+      <StatPill label="Affected" value={stats.affected} color="amber" icon={<AlertTriangle size={12} />} />
+      <StatPill label="Fault" value={stats.fault} color="red" icon={<Radio size={12} className={stats.fault > 0 ? 'animate-pulse' : ''} />} />
 
       <div className="flex-1" />
 
+      <Button variant="outline" size="sm" onClick={onRefresh} className="h-8 text-[11px] border-white/10">
+        <RefreshCw size={12} className={`mr-1.5 ${refreshing ? 'animate-spin' : ''}`} />
+        Reload
+      </Button>
+
+      {user ? (
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="text-[10px] border-emerald-500/30 text-emerald-300 bg-emerald-500/5">
+            <ShieldCheck size={10} className="mr-1" /> {user.email}
+          </Badge>
+          <Button variant="ghost" size="sm" onClick={onSignOut} className="h-8 text-[11px]">
+            <LogOut size={12} className="mr-1.5" /> Sign out
+          </Button>
+        </div>
+      ) : (
+        <Link href="/login">
+          <Button variant="outline" size="sm" className="h-8 text-[11px] border-white/10">
+            <LogIn size={12} className="mr-1.5" /> Sign in
+          </Button>
+        </Link>
+      )}
+
       <div className="flex items-center gap-2 text-[11px] text-zinc-500 font-mono">
-        <span
-          className={`h-2 w-2 rounded-full ${
-            stats.fault > 0 ? 'bg-red-500 animate-pulse' : 'bg-emerald-500'
-          }`}
-        />
+        <span className={`h-2 w-2 rounded-full ${stats.fault > 0 ? 'bg-red-500 animate-pulse' : 'bg-emerald-500'}`} />
         {stats.fault > 0 ? 'NETWORK COMPROMISED' : 'ALL SYSTEMS NOMINAL'}
       </div>
     </div>
@@ -659,9 +711,7 @@ function StatPill({ label, value, color, icon }) {
     red: 'text-red-300 border-red-500/20 bg-red-500/[0.06]',
   };
   return (
-    <div
-      className={`flex items-center gap-2 h-8 px-3 rounded-md border ${colorMap[color]} text-[11px] font-semibold`}
-    >
+    <div className={`flex items-center gap-2 h-8 px-3 rounded-md border ${colorMap[color]} text-[11px] font-semibold`}>
       {icon}
       <span className="tracking-widest uppercase text-[10px] text-zinc-400 font-bold">{label}</span>
       <span className="tabular-nums">{value}</span>
@@ -669,31 +719,15 @@ function StatPill({ label, value, color, icon }) {
   );
 }
 
-// =====================================================================
-// Legend (overlay on canvas)
-// =====================================================================
 function Legend() {
   return (
     <div className="absolute bottom-4 left-4 z-20 bg-zinc-950/85 backdrop-blur-xl border border-white/10 rounded-lg p-3 text-[10px] text-zinc-400 space-y-1.5 shadow-2xl">
-      <div className="text-[9px] font-bold tracking-[0.18em] uppercase text-zinc-500 mb-1.5">
-        Legend
-      </div>
+      <div className="text-[9px] font-bold tracking-[0.18em] uppercase text-zinc-500 mb-1.5">Legend</div>
       <LegendRow color="bg-emerald-500" label="Operational" />
       <LegendRow color="bg-amber-500" label="Affected (obszar zagrożony)" />
       <LegendRow color="bg-red-500" label="Fault — root cause" pulse />
       <Separator className="my-2 bg-white/5" />
-      <div className="flex items-center gap-2">
-        <Zap size={10} className="text-emerald-400" /> Transformer
-      </div>
-      <div className="flex items-center gap-2">
-        <CircuitBoard size={10} className="text-emerald-400" /> Switchgear
-      </div>
-      <div className="flex items-center gap-2">
-        <Cpu size={10} className="text-emerald-400" /> Distribution Board
-      </div>
-      <div className="flex items-center gap-2">
-        <Box size={10} className="text-emerald-400" /> Cabinet
-      </div>
+      <div className="text-[9px] font-mono text-zinc-600">scale 1 px = 10 cm</div>
     </div>
   );
 }
@@ -710,43 +744,44 @@ function LegendRow({ color, label, pulse }) {
 // Main page
 // =====================================================================
 export default function HomePage() {
+  const { buildings, nodes, loading, error, refresh } = useNetworkTopology();
+  const [refreshing, setRefreshing] = useState(false);
   const [faultedIds, setFaultedIds] = useState(() => new Set());
   const [selected, setSelected] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
+  const [user, setUser] = useState(null);
 
-  const computed = useMemo(
-    () => computeNetworkStatus(INITIAL_NODES, faultedIds),
-    [faultedIds]
-  );
+  useEffect(() => {
+    const sb = createClient();
+    sb.auth.getUser().then(({ data }) => setUser(data.user));
+    const { data: sub } = sb.auth.onAuthStateChange((_e, session) => setUser(session?.user || null));
+    return () => sub.subscription.unsubscribe();
+  }, []);
 
-  const inject = useCallback((id) => {
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await refresh();
+    setRefreshing(false);
+  }, [refresh]);
+
+  const computed = useMemo(() => computeNetworkStatus(nodes, faultedIds), [nodes, faultedIds]);
+
+  const toggleFault = useCallback((id) => {
     setFaultedIds((prev) => {
       const next = new Set(prev);
-      next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }, []);
-
+  const inject = useCallback((id) => setFaultedIds((p) => new Set(p).add(id)), []);
   const clearOne = useCallback((id) => {
-    setFaultedIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
+    setFaultedIds((p) => {
+      const n = new Set(p);
+      n.delete(id);
+      return n;
     });
   }, []);
-
-  const toggleFault = useCallback(
-    (id) => {
-      setFaultedIds((prev) => {
-        const next = new Set(prev);
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-        return next;
-      });
-    },
-    []
-  );
-
   const clearAll = useCallback(() => setFaultedIds(new Set()), []);
 
   const stats = useMemo(() => {
@@ -755,24 +790,47 @@ export default function HomePage() {
     return s;
   }, [computed]);
 
-  // Buildings status — which ones contain fault/affected nodes
   const buildingStatus = useMemo(() => {
     const map = {};
-    for (const b of BUILDINGS) map[b.id] = { hasFault: false, hasAffected: false };
+    for (const b of buildings) map[b.code] = { hasFault: false, hasAffected: false };
     for (const n of computed) {
+      if (!map[n.building]) continue;
       if (n.status === 'fault') map[n.building].hasFault = true;
       else if (n.status === 'affected') map[n.building].hasAffected = true;
     }
     return map;
-  }, [computed]);
+  }, [computed, buildings]);
+
+  // Canvas dimensions derived from buildings extent (+ padding)
+  const canvasDims = useMemo(() => {
+    if (!buildings.length) return { w: 1360, h: 720 };
+    let maxX = 0,
+      maxY = 0;
+    for (const b of buildings) {
+      maxX = Math.max(maxX, b.bounds.x + b.bounds.w);
+      maxY = Math.max(maxY, b.bounds.y + b.bounds.h);
+    }
+    return { w: Math.max(1360, Math.ceil(maxX + 60)), h: Math.max(720, Math.ceil(maxY + 80)) };
+  }, [buildings]);
+
+  const signOut = async () => {
+    await createClient().auth.signOut();
+  };
 
   return (
     <TooltipProvider delayDuration={120}>
       <div className="h-screen w-screen flex flex-col overflow-hidden">
-        <StatusBar stats={stats} />
+        <StatusBar
+          stats={stats}
+          user={user}
+          onSignOut={signOut}
+          onRefresh={handleRefresh}
+          refreshing={refreshing || loading}
+        />
 
         <div className="flex-1 flex overflow-hidden">
           <FaultPanel
+            buildings={buildings}
             nodes={computed}
             faultedIds={faultedIds}
             onInject={toggleFault}
@@ -783,30 +841,39 @@ export default function HomePage() {
             onToggle={() => setCollapsed((c) => !c)}
           />
 
-          {/* Canvas */}
           <main className="relative flex-1 overflow-auto">
+            {loading && (
+              <div className="absolute inset-0 z-30 flex items-center justify-center bg-zinc-950/70 backdrop-blur-sm">
+                <div className="flex items-center gap-3 text-zinc-300">
+                  <Loader2 className="animate-spin" size={18} />
+                  <span className="text-sm tracking-wider uppercase">Loading topology from Supabase…</span>
+                </div>
+              </div>
+            )}
+            {error && !loading && (
+              <div className="absolute inset-0 z-30 flex items-center justify-center">
+                <div className="max-w-md p-6 bg-red-950/50 border border-red-500/30 rounded-lg text-red-200">
+                  <div className="flex items-center gap-2 font-bold mb-2">
+                    <Database size={16} /> Supabase error
+                  </div>
+                  <pre className="text-[11px] whitespace-pre-wrap break-words">{error}</pre>
+                </div>
+              </div>
+            )}
+
             <div
               className="relative blueprint-grid industrial-noise"
-              style={{ width: 1360, height: 720, minWidth: '100%', minHeight: '100%' }}
+              style={{ width: canvasDims.w, height: canvasDims.h, minWidth: '100%', minHeight: '100%' }}
             >
-              {/* Buildings */}
-              {BUILDINGS.map((b) => (
+              {buildings.map((b) => (
                 <BuildingZone
-                  key={b.id}
+                  key={b.code}
                   building={b}
-                  hasFault={buildingStatus[b.id].hasFault}
-                  hasAffected={buildingStatus[b.id].hasAffected}
+                  hasFault={buildingStatus[b.code]?.hasFault}
+                  hasAffected={buildingStatus[b.code]?.hasAffected}
                 />
               ))}
 
-              {/* Connector hint (purely decorative — NOT logical cables) between
-                  utility and batch house since they are physically separate */}
-              <div
-                className="absolute h-[2px] bg-gradient-to-r from-transparent via-zinc-700/40 to-transparent pointer-events-none"
-                style={{ left: 940, top: 350, width: 50 }}
-              />
-
-              {/* Nodes */}
               {computed.map((node) => (
                 <NodeMarker
                   key={node.id}
@@ -818,13 +885,12 @@ export default function HomePage() {
 
               <Legend />
 
-              {/* Watermark */}
               <div className="absolute top-4 right-6 text-right pointer-events-none">
                 <div className="text-[10px] font-bold tracking-[0.3em] uppercase text-zinc-600">
                   Plant Blueprint · Sector A
                 </div>
                 <div className="text-[9px] font-mono text-zinc-700 mt-0.5">
-                  Top-down view · 1:200
+                  Top-down view · 1 px = 10 cm · {nodes.length} objects
                 </div>
               </div>
             </div>
