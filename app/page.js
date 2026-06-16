@@ -38,6 +38,7 @@ import {
   Plus,
   Minus,
   Maximize2,
+  Layers,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -756,6 +757,44 @@ function StatPill({ label, value, color, icon }) {
   );
 }
 
+// =====================================================================
+// Floor selector
+// =====================================================================
+function FloorSelector({ floors, selectedFloor, onSelect, totalNodes }) {
+  return (
+    <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 bg-zinc-950/85 backdrop-blur-xl border border-white/10 rounded-lg p-1 shadow-2xl pointer-events-auto">
+      <div className="flex items-center gap-1.5 px-2 pr-3 border-r border-white/10 text-[10px] font-bold tracking-[0.16em] uppercase text-zinc-500 select-none">
+        <Layers size={11} /> Floor
+      </div>
+      <button
+        onClick={() => onSelect(null)}
+        className={`h-7 px-2.5 rounded-md text-[11px] font-semibold transition-colors flex items-center gap-1 ${
+          selectedFloor === null
+            ? 'bg-white/15 text-zinc-100'
+            : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+        }`}
+      >
+        All
+        <span className="text-[9px] text-zinc-500 font-mono">({totalNodes})</span>
+      </button>
+      {floors.map((f) => (
+        <button
+          key={f.name}
+          onClick={() => onSelect(f.name)}
+          className={`h-7 px-2.5 rounded-md text-[11px] font-semibold transition-colors flex items-center gap-1 whitespace-nowrap ${
+            selectedFloor === f.name
+              ? 'bg-white/15 text-zinc-100'
+              : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+          }`}
+        >
+          {f.name}
+          <span className="text-[9px] text-zinc-500 font-mono">({f.count})</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function Legend() {
   return (
     <div className="absolute bottom-4 left-4 z-20 bg-zinc-950/85 backdrop-blur-xl border border-white/10 rounded-lg p-3 text-[10px] text-zinc-400 space-y-1.5 shadow-2xl">
@@ -787,6 +826,7 @@ export default function HomePage() {
   const [selected, setSelected] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
   const [user, setUser] = useState(null);
+  const [selectedFloor, setSelectedFloor] = useState('Ground');
 
   // Zoom / pan state
   const containerRef = React.useRef(null);
@@ -813,6 +853,24 @@ export default function HomePage() {
   }, [refresh]);
 
   const computed = useMemo(() => computeNetworkStatus(nodes, faultedIds), [nodes, faultedIds]);
+
+  // Derive sorted list of floors from loaded nodes
+  const availableFloors = useMemo(() => {
+    const floorMap = new Map();
+    for (const n of computed) {
+      if (!floorMap.has(n.floor)) {
+        floorMap.set(n.floor, { name: n.floor, level: n.floor_level, count: 0 });
+      }
+      floorMap.get(n.floor).count += 1;
+    }
+    return Array.from(floorMap.values()).sort((a, b) => a.level - b.level);
+  }, [computed]);
+
+  // Nodes visible on the currently selected floor (null = all)
+  const visibleNodes = useMemo(() => {
+    if (selectedFloor === null) return computed;
+    return computed.filter((n) => n.floor === selectedFloor);
+  }, [computed, selectedFloor]);
 
   const toggleFault = useCallback((id) => {
     setFaultedIds((prev) => {
@@ -851,12 +909,12 @@ export default function HomePage() {
 
   const nodesByBuilding = useMemo(() => {
     const map = {};
-    for (const n of computed) {
+    for (const n of visibleNodes) {
       if (!n.building) continue;
       map[n.building] = (map[n.building] || 0) + 1;
     }
     return map;
-  }, [computed]);
+  }, [visibleNodes]);
 
   // Canvas dimensions derived from buildings extent (+ padding)
   const canvasDims = useMemo(() => {
@@ -965,7 +1023,7 @@ export default function HomePage() {
         <div className="flex-1 flex overflow-hidden">
           <FaultPanel
             buildings={buildings}
-            nodes={computed}
+            nodes={visibleNodes}
             faultedIds={faultedIds}
             onInject={toggleFault}
             onClear={clearAll}
@@ -1026,7 +1084,7 @@ export default function HomePage() {
                   />
                 ))}
 
-                {computed.map((node) => (
+                {visibleNodes.map((node) => (
                   <NodeMarker
                     key={node.id}
                     node={node}
@@ -1037,6 +1095,14 @@ export default function HomePage() {
                 ))}
               </div>
             </div>
+
+            {/* Floor selector — fixed overlay above the canvas */}
+            <FloorSelector
+              floors={availableFloors}
+              selectedFloor={selectedFloor}
+              onSelect={setSelectedFloor}
+              totalNodes={computed.length}
+            />
 
             {/* Legend (fixed, outside transform) */}
             <Legend />
@@ -1064,7 +1130,7 @@ export default function HomePage() {
                 Plant Blueprint · Sector A
               </div>
               <div className="text-[9px] font-mono text-zinc-700 mt-0.5">
-                Top-down view · 1 px = 15 cm · {nodes.length} objects · zoom {Math.round(zoom * 100)}% · max {MAX_ZOOM * 100}%
+                Top-down view · 1 px = 15 cm · {visibleNodes.length}/{nodes.length} objects · {selectedFloor || 'All floors'} · zoom {Math.round(zoom * 100)}%
               </div>
             </div>
           </main>
