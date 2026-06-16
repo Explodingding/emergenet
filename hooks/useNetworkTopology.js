@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { BUILDINGS_LAYOUT } from '@/lib/buildings-layout';
 
 export const CM_PER_PX = 15;
 
@@ -30,7 +31,8 @@ function extractVoltage(p) {
   return null;
 }
 
-function reshape({ buildings, floors, object_types, objects, dependencies }) {
+function reshape({ floors, object_types, objects, dependencies }) {
+  const buildings = BUILDINGS_LAYOUT;
   const typeById = new Map(object_types.map((t) => [t.id, t]));
   const buildingById = new Map(buildings.map((b) => [b.id, b]));
   const floorById = new Map(floors.map((f) => [f.id, f]));
@@ -137,21 +139,19 @@ export function useNetworkTopology() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const [b, f, t, o, d] = await Promise.all([
-      supabase.from('buildings').select('*'),
+    const [f, t, o, d] = await Promise.all([
       supabase.from('floors').select('*'),
       supabase.from('object_types').select('*'),
       supabase.from('objects').select('*'),
       supabase.from('dependencies').select('*'),
     ]);
-    const first = [b, f, t, o, d].find((r) => r.error);
+    const first = [f, t, o, d].find((r) => r.error);
     if (first?.error) {
       setError(first.error.message);
       setLoading(false);
       return;
     }
     setRaw({
-      buildings: b.data || [],
       floors: f.data || [],
       object_types: t.data || [],
       objects: o.data || [],
