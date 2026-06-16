@@ -1,11 +1,13 @@
-// Auto-detects CI / GitHub Pages and switches between:
-//   - static export (output: 'export') for GitHub Pages
-//   - standalone (default) for local dev & Emergent preview
-const isCI = process.env.GITHUB_ACTIONS === 'true' || process.env.GITHUB_PAGES === 'true';
+/** @type {import('next').NextConfig} */
+const isCI = !!process.env.GITHUB_ACTIONS || process.env.GITHUB_PAGES === 'true';
 const repo = process.env.GH_PAGES_REPO || 'emergenet';
 
-const baseConfig = {
+const nextConfig = {
   reactStrictMode: true,
+  output: 'export',
+  basePath: isCI ? `/${repo}` : '',
+  assetPrefix: isCI ? `/${repo}/` : '',
+  trailingSlash: true,
   images: {
     unoptimized: true,
     remotePatterns: [
@@ -31,33 +33,4 @@ const baseConfig = {
   },
 };
 
-if (isCI) {
-  // GitHub Pages static export (basePath/assetPrefix injected by actions/configure-pages
-  // when `static_site_generator: next` is used, but we set them explicitly as fallback)
-  module.exports = {
-    ...baseConfig,
-    output: 'export',
-    basePath: `/${repo}`,
-    assetPrefix: `/${repo}/`,
-    trailingSlash: true,
-  };
-} else {
-  module.exports = {
-    ...baseConfig,
-    output: 'standalone',
-    async headers() {
-      return [
-        {
-          source: '/(.*)',
-          headers: [
-            { key: 'X-Frame-Options', value: 'ALLOWALL' },
-            { key: 'Content-Security-Policy', value: 'frame-ancestors *;' },
-            { key: 'Access-Control-Allow-Origin', value: process.env.CORS_ORIGINS || '*' },
-            { key: 'Access-Control-Allow-Methods', value: 'GET, POST, PUT, DELETE, OPTIONS' },
-            { key: 'Access-Control-Allow-Headers', value: '*' },
-          ],
-        },
-      ];
-    },
-  };
-}
+module.exports = nextConfig;
