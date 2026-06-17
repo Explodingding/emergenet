@@ -219,10 +219,10 @@ export function useNetworkTopology() {
     setLoading(true);
     setError(null);
     const [f, t, o, d] = await Promise.all([
-      supabase.from('floors').select('*'),
-      supabase.from('object_types').select('*'),
-      supabase.from('objects').select('*'),
-      supabase.from('dependencies').select('*'),
+      supabase.from('floors').select('*').limit(500),
+      supabase.from('object_types').select('*').limit(500),
+      supabase.from('objects').select('*').limit(10000),
+      supabase.from('dependencies').select('*').limit(50000),
     ]);
     const first = [f, t, o, d].find((r) => r.error);
     if (first?.error) {
