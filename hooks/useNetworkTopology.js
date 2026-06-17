@@ -209,6 +209,21 @@ function reshape({ floors, object_types, objects, dependencies }) {
   return { buildings: uiBuildings, nodes: uiNodes, types: object_types, categories };
 }
 
+// Fetches all rows from a Supabase table by paginating in batches of PAGE_SIZE,
+// bypassing the server-side max_rows = 1000 PostgREST limit.
+async function fetchAll(query, pageSize = 1000) {
+  let from = 0;
+  let all = [];
+  while (true) {
+    const { data, error } = await query.range(from, from + pageSize - 1);
+    if (error) return { data: null, error };
+    all = all.concat(data);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return { data: all, error: null };
+}
+
 export function useNetworkTopology() {
   const supabase = useMemo(() => createClient(), []);
   const [raw, setRaw] = useState(null);
@@ -219,10 +234,10 @@ export function useNetworkTopology() {
     setLoading(true);
     setError(null);
     const [f, t, o, d] = await Promise.all([
-      supabase.from('floors').select('*').limit(500),
-      supabase.from('object_types').select('*').limit(500),
-      supabase.from('objects').select('*').limit(10000),
-      supabase.from('dependencies').select('*').limit(50000),
+      fetchAll(supabase.from('floors').select('*')),
+      fetchAll(supabase.from('object_types').select('*')),
+      fetchAll(supabase.from('objects').select('*')),
+      fetchAll(supabase.from('dependencies').select('*')),
     ]);
     const first = [f, t, o, d].find((r) => r.error);
     if (first?.error) {
