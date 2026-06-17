@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { BUILDING_ROOMS } from '../lib/building-rooms';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -243,18 +244,30 @@ function NodeMarker({ node, onSelect, isSelected, zoom }) {
 // =====================================================================
 function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom }) {
   const { bounds } = building;
-  // Scale building labels inversely so they stay readable at any zoom level
   const safeZoom = zoom || 1;
+  const rooms = BUILDING_ROOMS[building.code] || [];
+
+  const borderColor = hasFault
+    ? 'border-red-500/50'
+    : hasAffected
+    ? 'border-amber-500/40'
+    : 'border-zinc-700/60';
+
+  const cornerColor = hasFault
+    ? 'border-red-400/70'
+    : hasAffected
+    ? 'border-amber-400/70'
+    : 'border-zinc-500/70';
+
   return (
     <div
-      className="absolute rounded-2xl pointer-events-none"
+      className="absolute rounded-2xl pointer-events-none overflow-hidden"
       style={{ left: bounds.x, top: bounds.y, width: bounds.w, height: bounds.h }}
     >
-      <div
-        className={`absolute inset-0 rounded-2xl border-2 ${
-          hasFault ? 'border-red-500/50' : hasAffected ? 'border-amber-500/40' : 'border-zinc-700/60'
-        } bg-zinc-900/30 backdrop-blur-[2px]`}
-      />
+      {/* Background fill */}
+      <div className={`absolute inset-0 rounded-2xl border-2 ${borderColor} bg-zinc-900/30 backdrop-blur-[2px]`} />
+
+      {/* Fault overlay */}
       <AnimatePresence>
         {(hasFault || hasAffected) && (
           <motion.div
@@ -274,17 +287,45 @@ function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom }) {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── Internal room walls ── */}
+      {rooms.map((room) => (
+        <div
+          key={room.code}
+          className="absolute border border-zinc-600/25"
+          style={{
+            left:   `${room.x1 * 100}%`,
+            top:    `${room.y1 * 100}%`,
+            width:  `${(room.x2 - room.x1) * 100}%`,
+            height: `${(room.y2 - room.y1) * 100}%`,
+            background: room.fill || 'transparent',
+          }}
+        >
+          {/* Room label — counter-scaled */}
+          <span
+            className="absolute top-0.5 left-1 font-mono text-zinc-500/60 leading-none whitespace-nowrap pointer-events-none select-none"
+            style={{
+              fontSize: 8,
+              transform: `scale(${1 / safeZoom})`,
+              transformOrigin: 'top left',
+            }}
+          >
+            {room.code}
+          </span>
+        </div>
+      ))}
+
+      {/* Corner brackets (drawn on top of rooms) */}
       {['top-2 left-2', 'top-2 right-2 rotate-90', 'bottom-2 left-2 -rotate-90', 'bottom-2 right-2 rotate-180'].map((pos) => (
         <div
           key={pos}
-          className={`absolute ${pos} h-4 w-4 border-t-2 border-l-2 ${
-            hasFault ? 'border-red-400/70' : hasAffected ? 'border-amber-400/70' : 'border-zinc-500/70'
-          }`}
+          className={`absolute ${pos} h-4 w-4 border-t-2 border-l-2 ${cornerColor} z-10`}
         />
       ))}
-      {/* Building label — counter-scaled so it stays readable at every zoom level */}
+
+      {/* Building label — counter-scaled */}
       <div
-        className="absolute top-3 left-4 flex items-center gap-2 origin-top-left"
+        className="absolute top-3 left-4 flex items-center gap-2 origin-top-left z-10"
         style={{ transform: `scale(${1 / safeZoom})` }}
       >
         <div
