@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getRooms, getFloorPlan } from '../lib/building-rooms';
+import { getFloorPlan } from '../lib/building-rooms';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -248,7 +248,7 @@ const LOD_SIMPLE = 36;  // outline + name only
 const LOD_MINI   = 16;  // tiny dot marker
 // Below LOD_MINI → building is completely hidden
 
-function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom, selectedFloor, showFloorPlan }) {
+function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom, selectedFloor }) {
   const { bounds } = building;
   const safeZoom = zoom || 1;
 
@@ -281,8 +281,7 @@ function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom, select
   }
 
   // ── SIMPLE / FULL ────────────────────────────────────────────────────────
-  const rooms = lod === 'full' ? getRooms(building.code, selectedFloor) : [];
-  const floorPlanSrc = showFloorPlan ? getFloorPlan(building.code, selectedFloor) : null;
+  const floorPlanSrc = lod === 'full' ? getFloorPlan(building.code, selectedFloor) : null;
 
   return (
     // Outer wrapper: no overflow-hidden so the label can float above the border
@@ -320,7 +319,7 @@ function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom, select
         )}
       </div>
 
-      {/* ── Inner container — overflow-hidden keeps rooms clipped ── */}
+      {/* ── Inner container — overflow-hidden clips floor plan to rounded shape ── */}
       <div className="absolute inset-0 rounded-2xl overflow-hidden">
         {/* Background fill + border */}
         <div className={`absolute inset-0 rounded-2xl border-2 ${borderColor} bg-zinc-900/30 backdrop-blur-[2px]`} />
@@ -346,40 +345,18 @@ function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom, select
           )}
         </AnimatePresence>
 
-        {/* ── Floor plan reference overlay ── */}
+        {/* CAD floor plan — shown automatically when an image exists for this building+floor */}
         {floorPlanSrc && (
           <img
             src={floorPlanSrc}
-            alt="floor plan"
+            alt={`${building.name} floor plan`}
             className="absolute inset-0 w-full h-full pointer-events-none select-none"
-            style={{ objectFit: 'fill', opacity: 0.45, mixBlendMode: 'screen' }}
+            style={{ objectFit: 'fill', opacity: 0.40, mixBlendMode: 'screen' }}
             draggable={false}
           />
         )}
 
-        {/* Room walls (full LOD only) */}
-        {rooms.map((room) => (
-          <div
-            key={room.code}
-            className="absolute border border-zinc-600/25"
-            style={{
-              left:   `${room.x1 * 100}%`,
-              top:    `${room.y1 * 100}%`,
-              width:  `${(room.x2 - room.x1) * 100}%`,
-              height: `${(room.y2 - room.y1) * 100}%`,
-              background: room.fill || 'transparent',
-            }}
-          >
-            <span
-              className="absolute top-0.5 left-1 font-mono text-zinc-500/55 leading-none whitespace-nowrap pointer-events-none select-none"
-              style={{ fontSize: 8, transform: `scale(${1 / safeZoom})`, transformOrigin: 'top left' }}
-            >
-              {room.code}
-            </span>
-          </div>
-        ))}
-
-        {/* Corner brackets (full LOD only) */}
+        {/* Corner brackets */}
         {lod === 'full' && ['top-2 left-2', 'top-2 right-2 rotate-90', 'bottom-2 left-2 -rotate-90', 'bottom-2 right-2 rotate-180'].map((pos) => (
           <div
             key={pos}
@@ -1074,7 +1051,6 @@ export default function HomePage() {
   const [collapsed, setCollapsed] = useState(false);
   const [user, setUser] = useState(null);
   const [selectedFloor, setSelectedFloor] = useState('Ground');
-  const [showFloorPlan, setShowFloorPlan] = useState(false);
 
   // Zoom / pan state
   const containerRef = React.useRef(null);
@@ -1330,7 +1306,6 @@ export default function HomePage() {
                     nodeCount={nodesByBuilding[b.code] || 0}
                     zoom={zoom}
                     selectedFloor={selectedFloor}
-                    showFloorPlan={showFloorPlan}
                   />
                 ))}
 
@@ -1368,19 +1343,6 @@ export default function HomePage() {
               <div className="h-px bg-white/5 my-0.5" />
               <button onClick={fitToWindow} className="h-8 w-8 rounded-md hover:bg-white/5 text-zinc-200 flex items-center justify-center" title="Fit to window">
                 <Maximize2 size={14} />
-              </button>
-              <div className="h-px bg-white/5 my-0.5" />
-              {/* Floor plan overlay toggle — only visible when an overlay exists */}
-              <button
-                onClick={() => setShowFloorPlan((v) => !v)}
-                className={`h-8 w-8 rounded-md flex items-center justify-center transition-colors ${
-                  showFloorPlan
-                    ? 'bg-violet-500/30 text-violet-300 border border-violet-500/50'
-                    : 'hover:bg-white/5 text-zinc-500'
-                }`}
-                title="Toggle floor plan overlay (CAD reference)"
-              >
-                <LayoutPanelTop size={14} />
               </button>
               <div className="text-[9px] text-zinc-500 font-mono text-center pt-1 pb-0.5">
                 {Math.round(zoom * 100)}%
