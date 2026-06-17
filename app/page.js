@@ -280,78 +280,30 @@ function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom, select
     );
   }
 
-  // ── SIMPLE: outline + name only (no rooms) ───────────────────────────────
+  // ── SIMPLE / FULL ────────────────────────────────────────────────────────
   const rooms = lod === 'full' ? getRooms(building.code, selectedFloor) : [];
 
   return (
+    // Outer wrapper: no overflow-hidden so the label can float above the border
     <div
-      className="absolute rounded-2xl pointer-events-none overflow-hidden"
+      className="absolute pointer-events-none"
       style={{ left: bounds.x, top: bounds.y, width: bounds.w, height: bounds.h }}
     >
-      {/* Background */}
-      <div className={`absolute inset-0 rounded-2xl border-2 ${borderColor} bg-zinc-900/30 backdrop-blur-[2px]`} />
-
-      {/* Fault overlay */}
-      <AnimatePresence>
-        {(hasFault || hasAffected) && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className={`absolute inset-0 rounded-2xl ${hasFault ? 'bg-red-500/[0.06]' : 'bg-amber-500/[0.06]'}`}
-          >
-            <div
-              className="absolute inset-0 rounded-2xl opacity-30"
-              style={{
-                backgroundImage: `repeating-linear-gradient(45deg, ${
-                  hasFault ? 'rgba(239,68,68,0.18)' : 'rgba(245,158,11,0.14)'
-                } 0 8px, transparent 8px 22px)`,
-              }}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── Internal room walls (full LOD only) ──────────────────────────── */}
-      {rooms.map((room) => (
-        <div
-          key={room.code}
-          className="absolute border border-zinc-600/25"
-          style={{
-            left:   `${room.x1 * 100}%`,
-            top:    `${room.y1 * 100}%`,
-            width:  `${(room.x2 - room.x1) * 100}%`,
-            height: `${(room.y2 - room.y1) * 100}%`,
-            background: room.fill || 'transparent',
-          }}
-        >
-          <span
-            className="absolute top-0.5 left-1 font-mono text-zinc-500/55 leading-none whitespace-nowrap pointer-events-none select-none"
-            style={{ fontSize: 8, transform: `scale(${1 / safeZoom})`, transformOrigin: 'top left' }}
-          >
-            {room.code}
-          </span>
-        </div>
-      ))}
-
-      {/* Corner brackets */}
-      {lod === 'full' && ['top-2 left-2', 'top-2 right-2 rotate-90', 'bottom-2 left-2 -rotate-90', 'bottom-2 right-2 rotate-180'].map((pos) => (
-        <div
-          key={pos}
-          className={`absolute ${pos} h-4 w-4 border-t-2 border-l-2 ${cornerColor} z-10`}
-        />
-      ))}
-
-      {/* Building label — counter-scaled, shown in both full and simple */}
+      {/* ── Building label — floated ABOVE the building, counter-scaled ── */}
       <div
-        className="absolute top-3 left-4 flex items-center gap-2 origin-top-left z-10"
-        style={{ transform: `scale(${1 / safeZoom})` }}
+        className="absolute flex items-center gap-2 origin-bottom-left whitespace-nowrap"
+        style={{
+          bottom: '100%',
+          left: 0,
+          marginBottom: 6,
+          transform: `scale(${1 / safeZoom})`,
+        }}
       >
         <div
           className="h-2 w-2 rounded-full flex-shrink-0"
-          style={{ background: building.accent, boxShadow: `0 0 10px ${building.accent}` }}
+          style={{ background: building.accent, boxShadow: `0 0 8px ${building.accent}` }}
         />
-        <span className="text-[11px] font-bold tracking-[0.18em] uppercase text-zinc-300">
+        <span className="text-[11px] font-bold tracking-[0.18em] uppercase text-zinc-300 drop-shadow-sm">
           {building.name}
         </span>
         {lod === 'full' && (
@@ -365,6 +317,63 @@ function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom, select
             {nodeCount}
           </span>
         )}
+      </div>
+
+      {/* ── Inner container — overflow-hidden keeps rooms clipped ── */}
+      <div className="absolute inset-0 rounded-2xl overflow-hidden">
+        {/* Background fill + border */}
+        <div className={`absolute inset-0 rounded-2xl border-2 ${borderColor} bg-zinc-900/30 backdrop-blur-[2px]`} />
+
+        {/* Fault overlay */}
+        <AnimatePresence>
+          {(hasFault || hasAffected) && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className={`absolute inset-0 rounded-2xl ${hasFault ? 'bg-red-500/[0.06]' : 'bg-amber-500/[0.06]'}`}
+            >
+              <div
+                className="absolute inset-0 rounded-2xl opacity-30"
+                style={{
+                  backgroundImage: `repeating-linear-gradient(45deg, ${
+                    hasFault ? 'rgba(239,68,68,0.18)' : 'rgba(245,158,11,0.14)'
+                  } 0 8px, transparent 8px 22px)`,
+                }}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Room walls (full LOD only) */}
+        {rooms.map((room) => (
+          <div
+            key={room.code}
+            className="absolute border border-zinc-600/25"
+            style={{
+              left:   `${room.x1 * 100}%`,
+              top:    `${room.y1 * 100}%`,
+              width:  `${(room.x2 - room.x1) * 100}%`,
+              height: `${(room.y2 - room.y1) * 100}%`,
+              background: room.fill || 'transparent',
+            }}
+          >
+            <span
+              className="absolute top-0.5 left-1 font-mono text-zinc-500/55 leading-none whitespace-nowrap pointer-events-none select-none"
+              style={{ fontSize: 8, transform: `scale(${1 / safeZoom})`, transformOrigin: 'top left' }}
+            >
+              {room.code}
+            </span>
+          </div>
+        ))}
+
+        {/* Corner brackets (full LOD only) */}
+        {lod === 'full' && ['top-2 left-2', 'top-2 right-2 rotate-90', 'bottom-2 left-2 -rotate-90', 'bottom-2 right-2 rotate-180'].map((pos) => (
+          <div
+            key={pos}
+            className={`absolute ${pos} h-4 w-4 border-t-2 border-l-2 ${cornerColor}`}
+          />
+        ))}
       </div>
     </div>
   );
