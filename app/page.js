@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { BUILDING_ROOMS } from '../lib/building-rooms';
+import { getRooms } from '../lib/building-rooms';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -242,10 +242,21 @@ function NodeMarker({ node, onSelect, isSelected, zoom }) {
 // =====================================================================
 // Building zone
 // =====================================================================
-function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom }) {
+// LOD thresholds (pixels on screen = bounds_px * zoom)
+const LOD_FULL   = 80;  // rooms + labels visible
+const LOD_SIMPLE = 36;  // outline + name only
+const LOD_MINI   = 16;  // tiny dot marker
+// Below LOD_MINI → building is completely hidden
+
+function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom, selectedFloor }) {
   const { bounds } = building;
   const safeZoom = zoom || 1;
-  const rooms = BUILDING_ROOMS[building.code] || [];
+
+  // ── Level-of-detail based on the SMALLER rendered dimension ──────────────
+  const minPx = Math.min(bounds.w, bounds.h) * safeZoom;
+  if (minPx < LOD_MINI) return null;  // too small to show at all
+
+  const lod = minPx >= LOD_FULL ? 'full' : minPx >= LOD_SIMPLE ? 'simple' : 'mini';
 
   const borderColor = hasFault
     ? 'border-red-500/50'
@@ -259,12 +270,25 @@ function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom }) {
     ? 'border-amber-400/70'
     : 'border-zinc-500/70';
 
+  // ── MINI: just a small coloured rectangle ────────────────────────────────
+  if (lod === 'mini') {
+    return (
+      <div
+        className={`absolute rounded pointer-events-none border ${borderColor} bg-zinc-900/40`}
+        style={{ left: bounds.x, top: bounds.y, width: bounds.w, height: bounds.h }}
+      />
+    );
+  }
+
+  // ── SIMPLE: outline + name only (no rooms) ───────────────────────────────
+  const rooms = lod === 'full' ? getRooms(building.code, selectedFloor) : [];
+
   return (
     <div
       className="absolute rounded-2xl pointer-events-none overflow-hidden"
       style={{ left: bounds.x, top: bounds.y, width: bounds.w, height: bounds.h }}
     >
-      {/* Background fill */}
+      {/* Background */}
       <div className={`absolute inset-0 rounded-2xl border-2 ${borderColor} bg-zinc-900/30 backdrop-blur-[2px]`} />
 
       {/* Fault overlay */}
@@ -288,7 +312,7 @@ function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom }) {
         )}
       </AnimatePresence>
 
-      {/* ── Internal room walls ── */}
+      {/* ── Internal room walls (full LOD only) ──────────────────────────── */}
       {rooms.map((room) => (
         <div
           key={room.code}
@@ -301,29 +325,24 @@ function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom }) {
             background: room.fill || 'transparent',
           }}
         >
-          {/* Room label — counter-scaled */}
           <span
-            className="absolute top-0.5 left-1 font-mono text-zinc-500/60 leading-none whitespace-nowrap pointer-events-none select-none"
-            style={{
-              fontSize: 8,
-              transform: `scale(${1 / safeZoom})`,
-              transformOrigin: 'top left',
-            }}
+            className="absolute top-0.5 left-1 font-mono text-zinc-500/55 leading-none whitespace-nowrap pointer-events-none select-none"
+            style={{ fontSize: 8, transform: `scale(${1 / safeZoom})`, transformOrigin: 'top left' }}
           >
             {room.code}
           </span>
         </div>
       ))}
 
-      {/* Corner brackets (drawn on top of rooms) */}
-      {['top-2 left-2', 'top-2 right-2 rotate-90', 'bottom-2 left-2 -rotate-90', 'bottom-2 right-2 rotate-180'].map((pos) => (
+      {/* Corner brackets */}
+      {lod === 'full' && ['top-2 left-2', 'top-2 right-2 rotate-90', 'bottom-2 left-2 -rotate-90', 'bottom-2 right-2 rotate-180'].map((pos) => (
         <div
           key={pos}
           className={`absolute ${pos} h-4 w-4 border-t-2 border-l-2 ${cornerColor} z-10`}
         />
       ))}
 
-      {/* Building label — counter-scaled */}
+      {/* Building label — counter-scaled, shown in both full and simple */}
       <div
         className="absolute top-3 left-4 flex items-center gap-2 origin-top-left z-10"
         style={{ transform: `scale(${1 / safeZoom})` }}
@@ -335,7 +354,9 @@ function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom }) {
         <span className="text-[11px] font-bold tracking-[0.18em] uppercase text-zinc-300">
           {building.name}
         </span>
-        <span className="text-[10px] font-mono text-zinc-500">{building.code}</span>
+        {lod === 'full' && (
+          <span className="text-[10px] font-mono text-zinc-500">{building.code}</span>
+        )}
         {nodeCount > 0 && (
           <span
             className="text-[10px] font-mono px-1.5 py-0.5 rounded-full border"
@@ -1286,6 +1307,7 @@ export default function HomePage() {
                     hasAffected={buildingStatus[b.code]?.hasAffected}
                     nodeCount={nodesByBuilding[b.code] || 0}
                     zoom={zoom}
+                    selectedFloor={selectedFloor}
                   />
                 ))}
 
