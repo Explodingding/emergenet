@@ -7,6 +7,9 @@ const nextConfig = {
   output: 'export',
   basePath: isCI ? `/${repo}` : '',
   assetPrefix: isCI ? `/${repo}/` : '',
+  env: {
+    NEXT_PUBLIC_BASE_PATH: isCI ? `/${repo}` : '',
+  },
   trailingSlash: true,
   images: {
     unoptimized: true,

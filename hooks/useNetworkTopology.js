@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { BUILDINGS_LAYOUT } from '@/lib/buildings-layout';
-import { parseLocationCode, ZONE_X, ROOM_ANCHORS } from '@/lib/room-anchors';
+import { parseLocationCode, ZONE_X, ROOM_ANCHORS, CODE_ZONE_MAP } from '@/lib/room-anchors';
 
 export const CM_PER_PX = 15;
 
@@ -33,8 +33,21 @@ function extractVoltage(p) {
 }
 
 // ---------------------------------------------------------------------------
+// Match an object code against CODE_ZONE_MAP for a given building.
+// Returns { zone, room } or null.
+// ---------------------------------------------------------------------------
+function matchCodeZone(objectCode, buildingCode) {
+  if (!objectCode || !buildingCode) return null;
+  const entries = CODE_ZONE_MAP[buildingCode];
+  if (!entries) return null;
+  const match = entries.find(e => objectCode.startsWith(e.prefix));
+  return match ? { zone: match.zone, room: match.room } : null;
+}
+
+// ---------------------------------------------------------------------------
 // Compute canvas coordinates (cm) for an object using location_code →
-// room anchors.  Falls back to stored coord_x / coord_y when unresolved.
+// room anchors, then code-prefix fallback.
+// Falls back to stored coord_x / coord_y when nothing resolves.
 // ---------------------------------------------------------------------------
 function resolveCoordsCm(o, building) {
   // Already positioned (non-zero)
@@ -42,35 +55,34 @@ function resolveCoordsCm(o, building) {
   if (!building) return { x: o.coord_x, y: o.coord_y };
 
   const locationCode = o.properties?.location_code;
-  if (!locationCode) return { x: o.coord_x, y: o.coord_y };
-
-  const { zone, room } = parseLocationCode(locationCode);
 
   const bx = building.bounds_x;
   const by = building.bounds_y;
   const bw = building.bounds_w;
   const bh = building.bounds_h;
   const MARGIN = Math.min(bw, bh) * 0.06;
-
-  // Anchor X from zone first, then room
   const zoneMap = ZONE_X[building.code] || {};
+
   let relX = 0.5;
-  if (zone && zoneMap[zone] !== undefined) {
-    relX = zoneMap[zone];
-  } else if (room && ROOM_ANCHORS[room]) {
-    relX = ROOM_ANCHORS[room].rel_x;
-  }
-
-  // Anchor Y from room
   let relY = 0.5;
-  if (room && ROOM_ANCHORS[room]) {
-    relY = ROOM_ANCHORS[room].rel_y;
+
+  if (locationCode) {
+    const { zone, room } = parseLocationCode(locationCode);
+    if (zone && zoneMap[zone] !== undefined) relX = zoneMap[zone];
+    else if (room && ROOM_ANCHORS[room]) relX = ROOM_ANCHORS[room].rel_x;
+    if (room && ROOM_ANCHORS[room]) relY = ROOM_ANCHORS[room].rel_y;
+  } else {
+    // No location code — try code-prefix zone fallback
+    const auto = matchCodeZone(o.code, building.code);
+    if (!auto) return { x: o.coord_x, y: o.coord_y };
+    if (auto.zone && zoneMap[auto.zone] !== undefined) relX = zoneMap[auto.zone];
+    if (auto.room && ROOM_ANCHORS[auto.room]) relY = ROOM_ANCHORS[auto.room].rel_y;
   }
 
-  const x = Math.round(bx + MARGIN + relX * (bw - MARGIN * 2));
-  const y = Math.round(by + MARGIN + relY * (bh - MARGIN * 2));
-
-  return { x, y };
+  return {
+    x: Math.round(bx + MARGIN + relX * (bw - MARGIN * 2)),
+    y: Math.round(by + MARGIN + relY * (bh - MARGIN * 2)),
+  };
 }
 
 function reshape({ floors, object_types, objects, dependencies }) {
@@ -80,9 +92,18 @@ function reshape({ floors, object_types, objects, dependencies }) {
   const floorById = new Map(floors.map((f) => [f.id, f]));
   const objectById = new Map(objects.map((o) => [o.id, o]));
 
-  // Group objects by (building_id, floor_id, location_code) so we can
+  // Group objects by (building_id, floor_id, zone-key) so we can
   // spread them within a room rather than stacking at the same point.
-  const groupKey = (o) => `${o.building_id}|${o.primary_floor_id}|${o.properties?.location_code || ''}`;
+  // When no location_code, derive zone from code prefix so each zone
+  // gets its own spread group rather than all defaulting to center.
+  const groupKey = (o) => {
+    const locCode = o.properties?.location_code;
+    if (locCode) return `${o.building_id}|${o.primary_floor_id}|${locCode}`;
+    const building = buildingById.get(o.building_id);
+    const auto = building ? matchCodeZone(o.code, building.code) : null;
+    const zoneKey = auto ? `AUTO-${auto.zone}-${auto.room}` : '_default';
+    return `${o.building_id}|${o.primary_floor_id}|${zoneKey}`;
+  };
   const groups = new Map();
   for (const o of objects) {
     const k = groupKey(o);
