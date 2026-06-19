@@ -105,6 +105,7 @@ function reshape({ floors, object_types, objects, dependencies }) {
         h: b.bounds_h / CM_PER_PX,
       },
       accent: b.accent_color,
+      floors: b.floors,
     }));
 
   // dependsOn map: only 'feeds' relation propagates power-loss

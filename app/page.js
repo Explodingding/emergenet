@@ -243,14 +243,17 @@ function NodeMarker({ node, onSelect, isSelected, zoom }) {
 // Building zone
 // =====================================================================
 // LOD thresholds (pixels on screen = bounds_px * zoom)
-const LOD_FULL   = 80;  // rooms + labels visible
-const LOD_SIMPLE = 36;  // outline + name only
+const LOD_FULL   = 50;  // rooms + labels visible
+const LOD_SIMPLE = 24;  // outline + name only
 const LOD_MINI   = 16;  // tiny dot marker
 // Below LOD_MINI → building is completely hidden
 
 function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom, selectedFloor }) {
   const { bounds } = building;
   const safeZoom = zoom || 1;
+
+  // ── Hide building if it doesn't exist on the selected floor ─────────────
+  if (selectedFloor && building.floors && !building.floors.includes(selectedFloor)) return null;
 
   // ── Level-of-detail based on the SMALLER rendered dimension ──────────────
   const minPx = Math.min(bounds.w, bounds.h) * safeZoom;
@@ -274,14 +277,14 @@ function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom, select
   if (lod === 'mini') {
     return (
       <div
-        className={`absolute rounded pointer-events-none border ${borderColor} bg-zinc-900/40`}
+        className={`absolute rounded pointer-events-none border ${borderColor} bg-white/30`}
         style={{ left: bounds.x, top: bounds.y, width: bounds.w, height: bounds.h }}
       />
     );
   }
 
   // ── SIMPLE / FULL ────────────────────────────────────────────────────────
-  const floorPlanSrc = lod === 'full' ? getFloorPlan(building.code, selectedFloor) : null;
+  const floorPlanSrc = lod !== 'mini' ? getFloorPlan(building.code, selectedFloor) : null;
 
   return (
     // Outer wrapper: no overflow-hidden so the label can float above the border
@@ -303,7 +306,7 @@ function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom, select
           className="h-2 w-2 rounded-full flex-shrink-0"
           style={{ background: building.accent, boxShadow: `0 0 8px ${building.accent}` }}
         />
-        <span className="text-[11px] font-bold tracking-[0.18em] uppercase text-zinc-300 drop-shadow-sm">
+        <span className="text-[11px] font-bold tracking-[0.18em] uppercase text-zinc-700 drop-shadow-sm">
           {building.name}
         </span>
         {lod === 'full' && (
@@ -322,7 +325,7 @@ function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom, select
       {/* ── Inner container — overflow-hidden clips floor plan to rounded shape ── */}
       <div className="absolute inset-0 rounded-2xl overflow-hidden">
         {/* Background fill + border */}
-        <div className={`absolute inset-0 rounded-2xl border-2 ${borderColor} bg-zinc-900/30 backdrop-blur-[2px]`} />
+        <div className={`absolute inset-0 rounded-2xl border-2 ${borderColor} bg-white/80`} />
 
         {/* Fault overlay */}
         <AnimatePresence>
@@ -351,7 +354,7 @@ function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom, select
             src={floorPlanSrc}
             alt={`${building.name} floor plan`}
             className="absolute inset-0 w-full h-full pointer-events-none select-none"
-            style={{ objectFit: 'fill', opacity: 0.40, mixBlendMode: 'screen' }}
+            style={{ objectFit: 'fill', opacity: 0.9, mixBlendMode: 'multiply' }}
             draggable={false}
           />
         )}
