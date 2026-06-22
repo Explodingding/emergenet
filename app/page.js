@@ -1053,7 +1053,7 @@ export default function HomePage() {
   const [selected, setSelected] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
   const [user, setUser] = useState(null);
-  const [selectedFloor, setSelectedFloor] = useState('Ground');
+  const [selectedFloor, setSelectedFloor] = useState('Level 0 m');
 
   // Zoom / pan state
   const containerRef = React.useRef(null);

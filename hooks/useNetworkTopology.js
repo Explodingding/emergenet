@@ -205,7 +205,7 @@ function reshape({ floors, object_types, objects, dependencies }) {
         type_category: t?.category || 'control',
         building: b?.code || null,
         building_name: b?.name || '',
-        floor: fl?.name || 'Ground',
+        floor: fl?.name || 'Level 0 m',
         floor_level: fl?.level ?? 0,
         coordinates: { x: finalX / CM_PER_PX, y: finalY / CM_PER_PX },
         coord_cm: { x: finalX, y: finalY },
