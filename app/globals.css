@@ -29,7 +29,7 @@
 
 /* Light grid for the factory canvas */
 .blueprint-grid {
-  background-color: #f0f2f5;
+  background-color: #ffffff;
   background-image:
     linear-gradient(rgba(80, 100, 140, 0.12) 1px, transparent 1px),
     linear-gradient(90deg, rgba(80, 100, 140, 0.12) 1px, transparent 1px),

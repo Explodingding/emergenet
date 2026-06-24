@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getFloorPlan } from '../lib/building-rooms';
+import { getSiteBackground, hasSiteBackgroundFor } from '../lib/site-backgrounds';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -49,7 +50,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { computeNetworkStatus, downstreamOf } from '@/lib/network-utils';
-import { useNetworkTopology } from '@/hooks/useNetworkTopology';
+import { useNetworkTopology, CM_PER_PX } from '@/hooks/useNetworkTopology';
 import { createClient } from '@/lib/supabase/client';
 
 // Icon registry: map icon name string -> lucide component
@@ -248,7 +249,38 @@ const LOD_SIMPLE = 24;  // outline + name only
 const LOD_MINI   = 16;  // tiny dot marker
 // Below LOD_MINI → building is completely hidden
 
-function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom, selectedFloor }) {
+// =====================================================================
+// Site background — unified floor-plan backdrop behind the building zones.
+// Renders placed plan images (cm → px via CM_PER_PX) for the selected floor.
+// =====================================================================
+function SiteBackground({ selectedFloor }) {
+  const layers = useMemo(() => getSiteBackground(selectedFloor), [selectedFloor]);
+  if (!layers.length) return null;
+  return (
+    <div className="absolute inset-0 pointer-events-none" aria-hidden>
+      {layers.map((l, i) => (
+        <img
+          key={`${l.src}-${i}`}
+          src={l.src}
+          alt=""
+          draggable={false}
+          className="absolute select-none"
+          style={{
+            left: l.x / CM_PER_PX,
+            top: l.y / CM_PER_PX,
+            width: l.w / CM_PER_PX,
+            height: l.h / CM_PER_PX,
+            objectFit: 'fill',
+            opacity: 0.85,
+            mixBlendMode: 'multiply',
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom, selectedFloor, hasSiteBackground }) {
   const { bounds } = building;
   const safeZoom = zoom || 1;
 
@@ -284,7 +316,10 @@ function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom, select
   }
 
   // ── SIMPLE / FULL ────────────────────────────────────────────────────────
-  const floorPlanSrc = lod !== 'mini' ? getFloorPlan(building.code, selectedFloor) : null;
+  // Skip the per-building overlay when the site background already covers this
+  // building (avoids drawing two plans on top of each other).
+  const floorPlanSrc =
+    lod !== 'mini' && !hasSiteBackground ? getFloorPlan(building.code, selectedFloor) : null;
 
   return (
     // Outer wrapper: no overflow-hidden so the label can float above the border
@@ -324,8 +359,9 @@ function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom, select
 
       {/* ── Inner container — overflow-hidden clips floor plan to rounded shape ── */}
       <div className="absolute inset-0 rounded-2xl overflow-hidden">
-        {/* Background fill + border */}
-        <div className={`absolute inset-0 rounded-2xl border-2 ${borderColor} bg-white/80`} />
+        {/* Background fill + border — fill is transparent when the site
+            background plan covers this building, so the plan shows through */}
+        <div className={`absolute inset-0 rounded-2xl border-2 ${borderColor} ${hasSiteBackground ? 'bg-white/10' : 'bg-white/80'}`} />
 
         {/* Fault overlay */}
         <AnimatePresence>
@@ -1053,7 +1089,7 @@ export default function HomePage() {
   const [selected, setSelected] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
   const [user, setUser] = useState(null);
-  const [selectedFloor, setSelectedFloor] = useState('Level 0 m');
+  const [selectedFloor, setSelectedFloor] = useState(null); // null = All floors (default view)
 
   // Zoom / pan state
   const containerRef = React.useRef(null);
@@ -1092,6 +1128,13 @@ export default function HomePage() {
     }
     return Array.from(floorMap.values()).sort((a, b) => a.level - b.level);
   }, [computed]);
+
+  // Whether a site-wide plan backdrop is active (makes building fills
+  // transparent so the plan shows through underneath the zones).
+  const siteBackgroundActive = useMemo(
+    () => hasSiteBackgroundFor(selectedFloor),
+    [selectedFloor]
+  );
 
   // Nodes visible on the currently selected floor (null = all)
   const visibleNodes = useMemo(() => {
@@ -1288,7 +1331,7 @@ export default function HomePage() {
               onMouseMove={onMouseMove}
               onMouseUp={stopDrag}
               onMouseLeave={stopDrag}
-              className={`absolute inset-0 overflow-hidden ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+              className={`absolute inset-0 overflow-hidden bg-white ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
               style={{ touchAction: 'none' }}
             >
               <div
@@ -1300,6 +1343,8 @@ export default function HomePage() {
                   willChange: 'transform',
                 }}
               >
+                <SiteBackground selectedFloor={selectedFloor} />
+
                 {buildings.map((b) => (
                   <BuildingZone
                     key={b.code}
@@ -1309,6 +1354,7 @@ export default function HomePage() {
                     nodeCount={nodesByBuilding[b.code] || 0}
                     zoom={zoom}
                     selectedFloor={selectedFloor}
+                    hasSiteBackground={siteBackgroundActive}
                   />
                 ))}
 

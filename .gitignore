@@ -86,3 +86,24 @@ node_modules/@next/swc-linux-arm64-musl/next-swc.linux-arm64-musl.node
 .env
 .env.local
 .env*.local
+
+# Large CAD source files & scratch render outputs (session work)
+*.dxf
+*.dwf
+/Cinerglass*
+scripts/*.npy
+scripts/pdf-full.png
+scripts/pdf-cropped.png
+scripts/pdf-cropped-preview.png
+scripts/pdf-preview.png
+scripts/zones-marked.png
+scripts/zones-verify.png
+scripts/plan-grid*.png
+scripts/plan-annotated*.png
+scripts/dwf-*.png
+scripts/dwf-*.jpg
+scripts/w2d-*.jpg
+scripts/band-*.png
+scripts/middle-*.png
+scripts/region-*.png
+scripts/dxf-full-render.png
