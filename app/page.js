@@ -1897,6 +1897,76 @@ function GenDpElevation() {
   );
 }
 
+// Generic front-elevation for distribution_board / mcc — scales to num_cabinets
+function GenericCabinetElevation({ node }) {
+  const N       = Math.max(1, node.properties?.num_cabinets ?? 1);
+  const CAB_W   = 130;
+  const CAB_H   = 280;
+  const CAB_GAP = 8;
+  const PAD_X   = 16;
+  const CAB_TOP = 44;
+  const BUSBAR_Y = 28;
+  const SLOTS   = 8;
+  const SLOT_H  = (CAB_H - 22) / SLOTS;
+  const TOTAL_W = PAD_X * 2 + N * CAB_W + (N - 1) * CAB_GAP;
+  const TOTAL_H = CAB_TOP + CAB_H + 28;
+  const voltage = node.properties?.voltage || '400 V';
+
+  return (
+    <svg viewBox={`0 0 ${TOTAL_W} ${TOTAL_H}`} xmlns="http://www.w3.org/2000/svg"
+         style={{ width: '100%', minWidth: TOTAL_W, height: 'auto' }}>
+      <rect width={TOTAL_W} height={TOTAL_H} fill="#0f172a" rx="6" />
+
+      {/* Busbar rail */}
+      <line x1={PAD_X} y1={BUSBAR_Y} x2={TOTAL_W - PAD_X} y2={BUSBAR_Y} stroke="#22c55e" strokeWidth="3" />
+      <line x1={PAD_X} y1={BUSBAR_Y + 4} x2={TOTAL_W - PAD_X} y2={BUSBAR_Y + 4} stroke="#22c55e" strokeWidth="1.5" opacity="0.4" />
+      <text x={PAD_X} y={BUSBAR_Y - 4} fill="#22c55e" fontSize="6" opacity="0.6">3/N/PE {voltage} 50Hz</text>
+
+      {Array.from({ length: N }, (_, i) => {
+        const x = PAD_X + i * (CAB_W + CAB_GAP);
+        const mx = x + CAB_W / 2;
+        return (
+          <g key={i}>
+            {/* Cabinet body */}
+            <rect x={x} y={CAB_TOP} width={CAB_W} height={CAB_H} fill="#0c1a2e" stroke="#22c55e" strokeWidth="1.5" rx="2" />
+            {/* Header bar */}
+            <rect x={x} y={CAB_TOP} width={CAB_W} height={18} fill="rgba(34,197,94,0.1)" rx="2" />
+            <text x={mx} y={CAB_TOP + 12} textAnchor="middle" fill="#22c55e" fontSize="7.5" fontWeight="700">
+              {String(i + 1).padStart(2, '0')}
+            </text>
+            {/* Busbar tap */}
+            <line x1={mx} y1={BUSBAR_Y + 4} x2={mx} y2={CAB_TOP + 18} stroke="#22c55e" strokeWidth="1" strokeDasharray="2,2" />
+            {/* Incomer breaker (top slot, taller) */}
+            <rect x={x + 8} y={CAB_TOP + 22} width={CAB_W - 16} height={SLOT_H * 1.5 - 2} rx="3"
+                  fill="#0a2040" stroke="#06b6d4" strokeWidth="1" />
+            <text x={mx} y={CAB_TOP + 22 + SLOT_H * 0.75 - 2} textAnchor="middle" fill="#06b6d4" fontSize="6.5" fontWeight="700">
+              {i === 0 ? 'INCOMER' : 'BUS TIE'}
+            </text>
+            <text x={mx} y={CAB_TOP + 22 + SLOT_H * 0.75 + 8} textAnchor="middle" fill="#06b6d4" fontSize="6" opacity="0.7">3WA · ACB</text>
+            {/* Outgoing drawer slots */}
+            {Array.from({ length: SLOTS - 1 }, (_, s) => {
+              const sy = CAB_TOP + 22 + SLOT_H * 1.5 + s * (SLOT_H * 0.9);
+              return (
+                <g key={s}>
+                  <rect x={x + 8} y={sy} width={CAB_W - 16} height={SLOT_H * 0.9 - 2}
+                        rx="2" fill="#132033" stroke="#1e3a52" strokeWidth="0.7" />
+                  <rect x={x + 10} y={sy + 3} width={16} height={SLOT_H * 0.9 - 8}
+                        rx="1" fill="#1e3a52" />
+                  <text x={x + 34} y={sy + SLOT_H * 0.45 + 1} fill="#4b5563" fontSize="5.5">OUTGOING {s + 1}</text>
+                </g>
+              );
+            })}
+            {/* Cabinet number label below */}
+            <text x={mx} y={CAB_TOP + CAB_H + 14} textAnchor="middle" fill="#3f3f46" fontSize="6.5" fontFamily="monospace">
+              +{String(i + 1).padStart(2, '0')}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 function ObjectDetailPanel({ node, allNodes, faultedIds, onClose, onSelect }) {
   const find = (id) => allNodes.find((n) => n.id === id);
   const parents         = (node.dependsOn || []).map(find).filter(Boolean);
@@ -1909,8 +1979,9 @@ function ObjectDetailPanel({ node, allNodes, faultedIds, onClose, onSelect }) {
   const syncPanels      = (node.synchronizedBy || []).map(find).filter(Boolean);
 
   const numCabinets = node.properties?.num_cabinets ?? 1;
-  const isSyncPanel = node.type === 'sync_panel';
-  const isGenDp     = node.code?.endsWith('-GEN-DP');
+  const isSyncPanel  = node.type === 'sync_panel';
+  const isGenDp      = node.id?.endsWith('-GEN-DP');
+  const isDistPanel  = !isGenDp && !isSyncPanel && ['distribution_board', 'mcc', 'cabinet'].includes(node.type);
   const borderColor = node.status === 'fault' ? '#ef4444' : node.status === 'affected' ? '#f59e0b' : isSyncPanel ? '#06b6d4' : isGenDp ? '#22c55e' : '#22c55e';
   const Icon = iconFor(node.type_icon);
   const steps = TROUBLESHOOT_STEPS[node.type_category] || TROUBLESHOOT_STEPS.control;
@@ -2221,12 +2292,14 @@ function ObjectDetailPanel({ node, allNodes, faultedIds, onClose, onSelect }) {
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="px-5 py-3 border-b border-white/5 flex items-center shrink-0">
             <span className="text-[11px] font-bold tracking-widest uppercase text-zinc-500">
-              {isSyncPanel || isGenDp ? 'Front Elevation' : 'Cabinet Drawing'}
+              {isSyncPanel || isGenDp ? 'Front Elevation' : isDistPanel ? 'Cabinet Layout' : 'Cabinet Drawing'}
             </span>
             {isSyncPanel
               ? <Badge className="text-[9px] bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 ml-auto">SIVACON S8 · P25-0001-P006</Badge>
               : isGenDp
               ? <Badge className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 ml-auto">SIVACON S8 · P25-0001-P023</Badge>
+              : isDistPanel
+              ? <Badge className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 ml-auto">{node.properties?.num_cabinets ?? 1} cabinet{(node.properties?.num_cabinets ?? 1) !== 1 ? 's' : ''} · schematic</Badge>
               : <Badge variant="outline" className="text-[9px] border-white/10 text-zinc-600 ml-auto">placeholder</Badge>
             }
           </div>
@@ -2246,6 +2319,15 @@ function ObjectDetailPanel({ node, allNodes, faultedIds, onClose, onSelect }) {
                 <GenDpElevation />
                 <p className="text-[9px] text-zinc-600 mt-2 text-center font-mono">
                   Front elevation · DNT-GROUP P25-0001-P023 rev M0 · 14.11.2025
+                </p>
+              </div>
+            </div>
+          ) : isDistPanel ? (
+            <div className="flex-1 overflow-auto">
+              <div className="p-4" style={{ minWidth: 'max-content' }}>
+                <GenericCabinetElevation node={node} />
+                <p className="text-[9px] text-zinc-600 mt-2 text-center font-mono">
+                  Schematic layout · {node.id} · {node.name}
                 </p>
               </div>
             </div>
@@ -2282,7 +2364,9 @@ export default function HomePage() {
 
   const [detailNode, setDetailNode] = useState(null);
   const handleSelect = useCallback((n) => {
-    if ((n.properties?.num_cabinets ?? 1) >= 3 || n.code?.endsWith('-GEN-DP')) {
+    const _isGenDp = n.id?.endsWith('-GEN-DP');
+    const _isDist  = ['distribution_board', 'mcc', 'cabinet'].includes(n.type);
+    if ((n.properties?.num_cabinets ?? 1) >= 3 || _isGenDp || _isDist) {
       setDetailNode(n);
     } else {
       setSelected(n);
