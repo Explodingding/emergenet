@@ -1517,107 +1517,182 @@ function PlacerPanel({ nodes, buildings, objectTypes, placeTarget, onSetTarget, 
 // =====================================================================
 // Single-line diagram for the SIVACON S8 Synchronization Switchgear (P25-0001-P006)
 function SyncPanelOneLine() {
-  const W = 780, H = 290;
-  const PAD = 38;
+  // Front-elevation cabinet view — each of the 13 cubicles shown as a tall panel
+  const CAB_W = 86;
+  const CAB_GAP = 5;
+  const PAD_X = 18;
   const N = SYNC_PANEL_CUBICLES.length;
-  const SPACING = (W - PAD * 2) / (N - 1);
-  const BUS_Y = 140;
-  const cx = (i) => PAD + i * SPACING;
+  const STRIDE = CAB_W + CAB_GAP;
+  const TOTAL_W = PAD_X * 2 + N * CAB_W + (N - 1) * CAB_GAP;
+  const BUSBAR_Y = 46;
+  const CAB_TOP = 58;
+  const CAB_H = 284;
+  const BRK_REL_Y = 56;
+  const BRK_W = 32;
+  const BRK_H = 32;
+  const TOTAL_H = CAB_TOP + CAB_H + 30;
 
-  const typeColor = (t) =>
-    t === 'INCOMER' ? '#06b6d4' : t === 'COUPLER' ? '#f59e0b' : '#22c55e';
+  const cabX = (i) => PAD_X + i * STRIDE;
+  const midX = (i) => cabX(i) + CAB_W / 2;
 
-  const shortLabel = (s) => s.length > 9 ? s.slice(0, 8) + '…' : s;
+  const typeColor = (t) => t === 'INCOMER' ? '#06b6d4' : t === 'COUPLER' ? '#f59e0b' : '#22c55e';
+  const typeFill  = (t) => t === 'INCOMER' ? 'rgba(6,182,212,0.06)' : t === 'COUPLER' ? 'rgba(245,158,11,0.07)' : 'rgba(34,197,94,0.06)';
+
+  const COUPLER_I = SYNC_PANEL_CUBICLES.findIndex(c => c.type === 'COUPLER');
+  const bus1x2 = cabX(COUPLER_I) - 3;
+  const bus2x1 = cabX(COUPLER_I) + CAB_W + 3;
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ maxHeight: 290 }} xmlns="http://www.w3.org/2000/svg">
-      {/* Busbar — left section panels 01-07, right section panels 09-13, gap at coupler */}
-      <line x1={cx(0)} y1={BUS_Y} x2={cx(6) + 14} y2={BUS_Y} stroke="#3f3f46" strokeWidth={4} strokeLinecap="round" />
-      <line x1={cx(8) - 14} y1={BUS_Y} x2={cx(N-1)} y2={BUS_Y} stroke="#3f3f46" strokeWidth={4} strokeLinecap="round" />
-      {/* Busbar label */}
-      <text x={cx(0)} y={BUS_Y + 18} fill="#52525b" fontSize={7} fontFamily="monospace">3/N/PE 400V 50Hz  4500A</text>
+    <svg
+      viewBox={`0 0 ${TOTAL_W} ${TOTAL_H}`}
+      xmlns="http://www.w3.org/2000/svg"
+      style={{ width: '100%', minWidth: TOTAL_W, height: 'auto' }}
+    >
+      {/* Header */}
+      <text x={PAD_X} y={16} fill="#52525b" fontSize={8} fontFamily="monospace" fontWeight="bold">
+        SIVACON S8 · 400 V / 50 Hz / 3N+PE · Ie 4500 A · Ik 100 kA (1 s) · Order P25-0001-P006
+      </text>
+      {/* Section labels */}
+      <text x={midX(2)} y={BUSBAR_Y - 10} textAnchor="middle" fill="#3f3f46" fontSize={7} fontFamily="monospace">── Section 1 (G1.1–G1.4) ──</text>
+      <text x={midX(10)} y={BUSBAR_Y - 10} textAnchor="middle" fill="#3f3f46" fontSize={7} fontFamily="monospace">── Section 2 (G1.6–G1.8) ──</text>
+
+      {/* Busbar rails */}
+      <line x1={PAD_X - 2} y1={BUSBAR_Y} x2={bus1x2} y2={BUSBAR_Y} stroke="#71717a" strokeWidth={5} strokeLinecap="round" />
+      <line x1={bus2x1} y1={BUSBAR_Y} x2={TOTAL_W - PAD_X + 2} y2={BUSBAR_Y} stroke="#71717a" strokeWidth={5} strokeLinecap="round" />
+      <text x={(bus1x2 + bus2x1) / 2} y={BUSBAR_Y + 3} textAnchor="middle" fill="#52525b" fontSize={6.5} fontFamily="monospace">╌╌</text>
 
       {SYNC_PANEL_CUBICLES.map((c, i) => {
-        const x = cx(i);
-        const color = typeColor(c.type);
+        const x  = cabX(i);
+        const cx = midX(i);
+        const col  = typeColor(c.type);
+        const fill = typeFill(c.type);
+        const isInc = c.type === 'INCOMER';
+        const isCpl = c.type === 'COUPLER';
+        const isOut = c.type === 'OUTGOING';
 
-        if (c.type === 'COUPLER') {
-          return (
-            <g key={c.id}>
-              {/* Vertical link spanning the busbar gap */}
-              <line x1={x} y1={BUS_Y - 28} x2={x} y2={BUS_Y + 28} stroke={color} strokeWidth={1.5} />
-              {/* Breaker box */}
-              <rect x={x - 10} y={BUS_Y - 9} width={20} height={18} fill="rgba(0,0,0,0.7)" stroke={color} strokeWidth={1.5} rx={2} />
-              <line x1={x - 6} y1={BUS_Y - 5} x2={x + 6} y2={BUS_Y + 5} stroke={color} strokeWidth={1} />
-              {/* Label */}
-              <text x={x} y={BUS_Y - 34} textAnchor="middle" fill={color} fontSize={7} fontFamily="monospace" fontWeight="bold">CPL</text>
-              <text x={x} y={BUS_Y - 26} textAnchor="middle" fill={color} fontSize={7}>{c.rating}</text>
-              <text x={x} y={BUS_Y + 40} textAnchor="middle" fill="#52525b" fontSize={7} fontFamily="monospace">{c.id}</text>
-            </g>
-          );
-        }
+        const BRK_ABS_Y = CAB_TOP + BRK_REL_Y;
+        const BRK_X    = cx - BRK_W / 2;
+        const BRK_BOT  = BRK_ABS_Y + BRK_H;
 
-        if (c.type === 'INCOMER') {
-          // Generator incomer: power flows UP into the busbar from below
-          return (
-            <g key={c.id}>
-              {/* Connection from busbar down */}
-              <line x1={x} y1={BUS_Y} x2={x} y2={BUS_Y + 26} stroke={color} strokeWidth={1.5} />
-              {/* Withdrawable breaker rectangle */}
-              <rect x={x - 9} y={BUS_Y + 26} width={18} height={12} fill="rgba(0,0,0,0.7)" stroke={color} strokeWidth={1.5} rx={1} />
-              <line x1={x - 6} y1={BUS_Y + 29} x2={x + 6} y2={BUS_Y + 35} stroke={color} strokeWidth={1} />
-              {/* Line to generator */}
-              <line x1={x} y1={BUS_Y + 38} x2={x} y2={BUS_Y + 72} stroke={color} strokeWidth={1.5} />
-              {/* CT (current transformer) symbol */}
-              <ellipse cx={x} cy={BUS_Y + 55} rx={6} ry={4} fill="none" stroke={color} strokeWidth={1} opacity={0.7} />
-              {/* SENTRON PAC measuring */}
-              <text x={x + 8} y={BUS_Y + 57} fill={color} fontSize={6} opacity={0.7}>M</text>
-              {/* Generator circle */}
-              <circle cx={x} cy={BUS_Y + 81} r={9} fill="rgba(0,0,0,0.8)" stroke={color} strokeWidth={1.5} />
-              <text x={x} y={BUS_Y + 85} textAnchor="middle" fill={color} fontSize={7} fontWeight="bold">G</text>
-              {/* Upward arrow showing power direction */}
-              <polygon points={`${x},${BUS_Y+38} ${x-4},${BUS_Y+46} ${x+4},${BUS_Y+46}`} fill={color} />
-              {/* Labels */}
-              <text x={x} y={BUS_Y + 100} textAnchor="middle" fill={color} fontSize={8} fontFamily="monospace">{c.connected}</text>
-              <text x={x} y={BUS_Y + 110} textAnchor="middle" fill="#71717a" fontSize={6.5}>{c.rating}</text>
-              {/* Panel number */}
-              <text x={x} y={BUS_Y - 8} textAnchor="middle" fill="#52525b" fontSize={7} fontFamily="monospace">{c.id}</text>
-            </g>
-          );
-        }
-
-        // OUTGOING — load drawn downward from busbar, transformer at top
         return (
           <g key={c.id}>
-            {/* Connection from busbar up */}
-            <line x1={x} y1={BUS_Y} x2={x} y2={BUS_Y - 26} stroke={color} strokeWidth={1.5} />
-            {/* Withdrawable breaker rectangle */}
-            <rect x={x - 9} y={BUS_Y - 38} width={18} height={12} fill="rgba(0,0,0,0.7)" stroke={color} strokeWidth={1.5} rx={1} />
-            <line x1={x - 6} y1={BUS_Y - 35} x2={x + 6} y2={BUS_Y - 29} stroke={color} strokeWidth={1} />
-            {/* Line to transformer */}
-            <line x1={x} y1={BUS_Y - 38} x2={x} y2={BUS_Y - 72} stroke={color} strokeWidth={1.5} />
-            {/* Transformer symbol — two overlapping circles */}
-            <circle cx={x} cy={BUS_Y - 78} r={7} fill="rgba(0,0,0,0.8)" stroke={color} strokeWidth={1.5} />
-            <circle cx={x} cy={BUS_Y - 88} r={7} fill="rgba(0,0,0,0.8)" stroke={color} strokeWidth={1.5} />
-            {/* Downward arrow showing power direction */}
-            <polygon points={`${x},${BUS_Y-38} ${x-4},${BUS_Y-46} ${x+4},${BUS_Y-46}`} fill={color} />
-            {/* Labels */}
-            <text x={x} y={BUS_Y - 100} textAnchor="middle" fill={color} fontSize={8} fontFamily="monospace">{shortLabel(c.connected)}</text>
-            <text x={x} y={BUS_Y - 110} textAnchor="middle" fill="#71717a" fontSize={6.5}>{c.rating}</text>
-            {/* Panel number */}
-            <text x={x} y={BUS_Y + 18} textAnchor="middle" fill="#52525b" fontSize={7} fontFamily="monospace">{c.id}</text>
+            {/* Cabinet body */}
+            <rect x={x} y={CAB_TOP} width={CAB_W} height={CAB_H} rx={3}
+              fill={fill} stroke={col} strokeWidth={1.5} />
+            {/* Top colour band */}
+            <rect x={x + 1} y={CAB_TOP + 1} width={CAB_W - 2} height={8} rx={2} fill={col} opacity={0.45} />
+            {/* Panel ID */}
+            <text x={cx} y={CAB_TOP + 21} textAnchor="middle"
+              fill={col} fontSize={13} fontFamily="monospace" fontWeight="bold">{c.id}</text>
+            {/* Type label */}
+            <text x={cx} y={CAB_TOP + 33} textAnchor="middle"
+              fill={col} fontSize={6.5} fontFamily="monospace" opacity={0.75}>{c.type}</text>
+            {/* Separator */}
+            <line x1={x + 8} y1={CAB_TOP + 37} x2={x + CAB_W - 8} y2={CAB_TOP + 37}
+              stroke={col} strokeWidth={0.5} opacity={0.25} />
+
+            {/* Busbar tap */}
+            {!isCpl && (
+              <line x1={cx} y1={BUSBAR_Y} x2={cx} y2={BRK_ABS_Y} stroke={col} strokeWidth={1.5} />
+            )}
+
+            {/* 3WA air circuit breaker */}
+            {!isCpl && (
+              <g>
+                <rect x={BRK_X} y={BRK_ABS_Y} width={BRK_W} height={BRK_H}
+                  fill="rgba(0,0,0,0.88)" stroke={col} strokeWidth={1.5} rx={2} />
+                <line x1={BRK_X + 6} y1={BRK_BOT - 6} x2={BRK_X + BRK_W - 6} y2={BRK_ABS_Y + 6}
+                  stroke={col} strokeWidth={1.3} />
+                <text x={cx} y={BRK_ABS_Y + BRK_H / 2 + 3} textAnchor="middle"
+                  fill={col} fontSize={6} fontFamily="monospace" opacity={0.6}>3WA</text>
+              </g>
+            )}
+            {!isCpl && (
+              <>
+                <text x={cx} y={BRK_BOT + 11} textAnchor="middle"
+                  fill={col} fontSize={5.5} fontFamily="monospace" opacity={0.85}>
+                  {c.breaker.replace('3WA ', '')}
+                </text>
+                <text x={cx} y={BRK_BOT + 20} textAnchor="middle"
+                  fill={col} fontSize={7} fontFamily="monospace" fontWeight="bold">{c.rating}</text>
+              </>
+            )}
+
+            {/* OUTGOING: busbar → breaker → transformer → load */}
+            {isOut && (
+              <g>
+                <line x1={cx} y1={BRK_BOT} x2={cx} y2={CAB_TOP + 136} stroke={col} strokeWidth={1.5} />
+                <polygon points={`${cx},${CAB_TOP + 120} ${cx - 5},${CAB_TOP + 112} ${cx + 5},${CAB_TOP + 112}`} fill={col} />
+                <circle cx={cx} cy={CAB_TOP + 150} r={13} fill="rgba(0,0,0,0.88)" stroke={col} strokeWidth={1.5} />
+                <circle cx={cx} cy={CAB_TOP + 169} r={13} fill="rgba(0,0,0,0.88)" stroke={col} strokeWidth={1.5} />
+                <text x={cx} y={CAB_TOP + 155} textAnchor="middle" fill={col} fontSize={7} fontFamily="monospace" opacity={0.55}>~</text>
+                <text x={cx} y={CAB_TOP + 174} textAnchor="middle" fill={col} fontSize={7} fontFamily="monospace" opacity={0.55}>~</text>
+                <text x={cx} y={CAB_TOP + 198} textAnchor="middle"
+                  fill={col} fontSize={8} fontFamily="monospace" fontWeight="bold">{c.connected}</text>
+                <text x={cx} y={CAB_TOP + 209} textAnchor="middle" fill="#71717a" fontSize={6} fontFamily="monospace">{c.busbar}</text>
+              </g>
+            )}
+
+            {/* INCOMER: generator → CT → PAC meter → breaker → busbar */}
+            {isInc && (
+              <g>
+                <polygon points={`${cx},${CAB_TOP + 108} ${cx - 5},${CAB_TOP + 116} ${cx + 5},${CAB_TOP + 116}`} fill={col} />
+                <line x1={cx} y1={BRK_BOT} x2={cx} y2={CAB_TOP + 154} stroke={col} strokeWidth={1.5} />
+                <ellipse cx={cx} cy={CAB_TOP + 154} rx={11} ry={7} fill="none" stroke={col} strokeWidth={1.3} />
+                <text x={cx + 14} y={CAB_TOP + 157} fill={col} fontSize={6.5} fontFamily="monospace">CT</text>
+                <rect x={cx - 13} y={CAB_TOP + 163} width={26} height={14} rx={2}
+                  fill="rgba(0,0,0,0.75)" stroke={col} strokeWidth={0.9} opacity={0.7} />
+                <text x={cx} y={CAB_TOP + 173} textAnchor="middle" fill={col} fontSize={5.5} opacity={0.7}>SENTRON PAC</text>
+                <line x1={cx} y1={CAB_TOP + 177} x2={cx} y2={CAB_TOP + 200} stroke={col} strokeWidth={1.5} />
+                <circle cx={cx} cy={CAB_TOP + 215} r={16} fill="rgba(0,0,0,0.88)" stroke={col} strokeWidth={1.8} />
+                <text x={cx} y={CAB_TOP + 220} textAnchor="middle"
+                  fill={col} fontSize={11} fontWeight="bold">G</text>
+                <text x={cx} y={CAB_TOP + 244} textAnchor="middle"
+                  fill={col} fontSize={8} fontFamily="monospace" fontWeight="bold">{c.connected}</text>
+                <text x={cx} y={CAB_TOP + 255} textAnchor="middle" fill="#71717a" fontSize={6} fontFamily="monospace">{c.busbar}</text>
+              </g>
+            )}
+
+            {/* COUPLER: bus-tie breaker bridging both sections */}
+            {isCpl && (
+              <g>
+                <line x1={x - CAB_GAP - 1} y1={BUSBAR_Y} x2={x + 16} y2={BUSBAR_Y}
+                  stroke={col} strokeWidth={1.5} strokeDasharray="4 3" />
+                <line x1={x + CAB_W - 16} y1={BUSBAR_Y} x2={x + CAB_W + CAB_GAP + 1} y2={BUSBAR_Y}
+                  stroke={col} strokeWidth={1.5} strokeDasharray="4 3" />
+                <line x1={x + 18} y1={BUSBAR_Y} x2={x + 18} y2={CAB_TOP + 124} stroke={col} strokeWidth={1.5} />
+                <line x1={x + CAB_W - 18} y1={BUSBAR_Y} x2={x + CAB_W - 18} y2={CAB_TOP + 124} stroke={col} strokeWidth={1.5} />
+                <rect x={x + 6} y={CAB_TOP + 124} width={CAB_W - 12} height={50} rx={4}
+                  fill="rgba(245,158,11,0.10)" stroke={col} strokeWidth={1.5} />
+                <line x1={x + 14} y1={CAB_TOP + 166} x2={x + CAB_W - 14} y2={CAB_TOP + 132}
+                  stroke={col} strokeWidth={1.2} />
+                <text x={cx} y={CAB_TOP + 140} textAnchor="middle" fill={col} fontSize={6.5} fontFamily="monospace" fontWeight="bold">BUS COUPLER</text>
+                <text x={cx} y={CAB_TOP + 151} textAnchor="middle" fill={col} fontSize={6} fontFamily="monospace">3WA 4P 100kA</text>
+                <text x={cx} y={CAB_TOP + 163} textAnchor="middle" fill={col} fontSize={7} fontFamily="monospace" fontWeight="bold">{c.rating}</text>
+                <text x={cx} y={CAB_TOP + 192} textAnchor="middle"
+                  fill={col} fontSize={7.5} fontFamily="monospace">{c.connected}</text>
+                <text x={cx} y={CAB_TOP + 203} textAnchor="middle" fill="#71717a" fontSize={6} fontFamily="monospace">{c.busbar}</text>
+              </g>
+            )}
+
+            {/* PE ground symbol */}
+            <g opacity={0.35}>
+              <line x1={cx - 9} y1={CAB_TOP + CAB_H - 11} x2={cx + 9} y2={CAB_TOP + CAB_H - 11} stroke="#71717a" strokeWidth={1.2} />
+              <line x1={cx - 6} y1={CAB_TOP + CAB_H - 7}  x2={cx + 6} y2={CAB_TOP + CAB_H - 7}  stroke="#71717a" strokeWidth={1.2} />
+              <line x1={cx - 3} y1={CAB_TOP + CAB_H - 3}  x2={cx + 3} y2={CAB_TOP + CAB_H - 3}  stroke="#71717a" strokeWidth={1.2} />
+            </g>
           </g>
         );
       })}
 
       {/* Legend */}
-      <g transform={`translate(${W / 2 - 130}, ${H - 12})`}>
-        <rect x={0} y={-7} width={9} height={9} fill="none" stroke="#22c55e" strokeWidth={1} rx={1} />
-        <text x={13} y={1} fill="#22c55e" fontSize={7}>Outgoing feeder</text>
-        <rect x={108} y={-7} width={9} height={9} fill="none" stroke="#06b6d4" strokeWidth={1} rx={1} />
-        <text x={121} y={1} fill="#06b6d4" fontSize={7}>Generator incomer</text>
-        <rect x={236} y={-7} width={9} height={9} fill="none" stroke="#f59e0b" strokeWidth={1} rx={1} />
-        <text x={249} y={1} fill="#f59e0b" fontSize={7}>Bus coupler</text>
+      <g transform={`translate(${TOTAL_W / 2 - 155}, ${CAB_TOP + CAB_H + 16})`}>
+        <rect x={0}   y={-7} width={8} height={8} fill="none" stroke="#22c55e" strokeWidth={1} rx={1} />
+        <text x={12}  y={1} fill="#22c55e" fontSize={7.5} fontFamily="monospace">Outgoing feeder</text>
+        <rect x={128} y={-7} width={8} height={8} fill="none" stroke="#06b6d4" strokeWidth={1} rx={1} />
+        <text x={140} y={1} fill="#06b6d4" fontSize={7.5} fontFamily="monospace">Generator incomer</text>
+        <rect x={278} y={-7} width={8} height={8} fill="none" stroke="#f59e0b" strokeWidth={1} rx={1} />
+        <text x={290} y={1} fill="#f59e0b" fontSize={7.5} fontFamily="monospace">Bus coupler</text>
       </g>
     </svg>
   );
@@ -1940,14 +2015,14 @@ function ObjectDetailPanel({ node, allNodes, faultedIds, onClose, onSelect }) {
           </div>
 
           {isSyncPanel ? (
-            <ScrollArea className="flex-1">
-              <div className="p-4">
+            <div className="flex-1 overflow-auto">
+              <div className="p-5" style={{ minWidth: 'max-content' }}>
                 <SyncPanelOneLine />
                 <p className="text-[9px] text-zinc-600 mt-2 text-center font-mono">
-                  Schematic derived from DNT-GROUP doc P25-0001-P006 rev R2 · 23.07.2025
+                  Front elevation · DNT-GROUP P25-0001-P006 rev R2 · 23.07.2025
                 </p>
               </div>
-            </ScrollArea>
+            </div>
           ) : (
             <div className="flex-1 flex items-center justify-center">
               <div className="flex flex-col items-center gap-4 text-center max-w-xs">
