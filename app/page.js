@@ -1732,6 +1732,171 @@ const SYNC_PANEL_TECH = {
   peSection:       '1×2×40×5 mm',
 };
 
+// ─── F1-GEN-DP data (P25-0001-P023, DNT-GROUP, rev M0 14.11.2025) ────────────
+const F1_GEN_DP_FEEDERS_02 = [
+  { slot: 'B02', label: 'F1-DPG.4',  rating: '80A',  kind: 'out' },
+  { slot: 'B03', label: 'F1-DPG.5',  rating: '80A',  kind: 'out' },
+  { slot: 'B06', label: 'UT-DP',     rating: '160A', kind: 'out' },
+  { slot: 'B12', label: 'F1-LP2',    rating: '80A',  kind: 'out' },
+  { slot: 'B13', label: 'F1-LP3',    rating: '80A',  kind: 'out' },
+  { slot: 'B14', label: 'F1-LP4',    rating: '80A',  kind: 'out' },
+  { slot: 'B15', label: 'F1-LP5',    rating: '80A',  kind: 'out' },
+  { slot: 'B16', label: 'F1-LP6',    rating: '80A',  kind: 'out' },
+  { slot: 'B17', label: 'W1-LP1',    rating: '80A',  kind: 'out' },
+  { slot: 'B18', label: 'F1-MCC.2',  rating: '100A', kind: 'out' },
+  { slot: 'B20', label: 'F1-MCC.4',  rating: '80A',  kind: 'out' },
+  { slot: 'B23', label: 'SPARE-5',   rating: '160A', kind: 'spare' },
+];
+const F1_GEN_DP_FEEDERS_03 = [
+  { slot: null,  label: 'EMPTY',     rating: '—',    kind: 'empty' },
+  { slot: 'B01', label: 'F1-DPG.3',  rating: '50A',  kind: 'out' },
+  { slot: 'B04', label: 'F1-DPG.6',  rating: '50A',  kind: 'out' },
+  { slot: 'B05', label: 'F1-DPG.7',  rating: '63A',  kind: 'out' },
+  { slot: 'B07', label: 'MS-DP',     rating: '50A',  kind: 'out' },
+  { slot: 'B08', label: 'SPARE-1',   rating: '63A',  kind: 'spare' },
+  { slot: 'B09', label: 'F1-ADP',    rating: '50A',  kind: 'out' },
+  { slot: 'B10', label: 'PW-DP',     rating: '63A',  kind: 'out' },
+  { slot: 'B11', label: 'SPARE-2',   rating: '63A',  kind: 'spare' },
+  { slot: 'B19', label: 'F1-MCC.3',  rating: '63A',  kind: 'out' },
+  { slot: 'B21', label: 'SPARE-3',   rating: '40A',  kind: 'spare' },
+  { slot: 'B22', label: 'SPARE-4',   rating: '80A',  kind: 'spare' },
+];
+const GEN_DP_TECH = {
+  switchgear:     'SIVACON S8',
+  order:          'P25-0001-P023',
+  ratedVoltage:   '400 V AC / 50 Hz / 3N PE',
+  mainBusbarIe:   '2200 A',
+  loadRatedIr:    '500 A',
+  shortCircuit:   '25 kA (1 s)',
+  protection:     'IP31',
+  cubicleHeight:  '2200 mm',
+  cubicleDepth:   '1000 mm',
+  totalWidth:     '2600 mm (3 cubicles)',
+  busbarSection:  '1×2×20×10 mm (L1–L3, N)',
+  peSection:      '1×2×20×5 mm',
+  color:          'RAL 7035',
+};
+
+function GenDpElevation() {
+  const PAD_X  = 16;
+  const GAP    = 8;
+  const W1     = 190;  // +01 INCOMER  (850 mm real)
+  const W2     = 230;  // +02 OUTGOING A (850 mm real)
+  const W3     = 130;  // +03 OUTGOING B (450 mm real)
+  const CAB_H  = 300;
+  const CAB_TOP   = 48;
+  const BUSBAR_Y  = 32;
+  const HEADER_H  = 18;
+  const TOTAL_W   = PAD_X * 2 + W1 + GAP + W2 + GAP + W3; // 598
+  const TOTAL_H   = CAB_TOP + CAB_H + 36;                   // 384
+
+  const X1 = PAD_X;
+  const X2 = X1 + W1 + GAP;
+  const X3 = X2 + W2 + GAP;
+  const BODY_Y = CAB_TOP;
+
+  const CELL_H  = (CAB_H - HEADER_H - 4) / 6; // ≈46 px
+  const CW2     = (W2 - 12) / 2;               // ≈109 px
+  const CW3     = (W3 - 10) / 2;               // 60 px
+
+  const KIND_CLR = { out: '#22c55e', spare: '#f59e0b', empty: '#3f3f46' };
+
+  return (
+    <svg viewBox={`0 0 ${TOTAL_W} ${TOTAL_H}`} xmlns="http://www.w3.org/2000/svg"
+         style={{ width: '100%', minWidth: TOTAL_W, height: 'auto' }}>
+      <rect width={TOTAL_W} height={TOTAL_H} fill="#0f172a" rx="6" />
+
+      {/* Busbar rails L1 L2 L3 N PE */}
+      {[0,3,6,9,12].map((off, i) => (
+        <line key={i} x1={X1} y1={BUSBAR_Y - off} x2={X3 + W3} y2={BUSBAR_Y - off}
+              stroke={['#ef4444','#f59e0b','#3b82f6','#a3a3a3','#22c55e'][i]}
+              strokeWidth="2" />
+      ))}
+      {['L1','L2','L3','N','PE'].map((lbl, i) => (
+        <text key={lbl} x={X1 - 3} y={BUSBAR_Y - i * 3 + 1.5} textAnchor="end" fill="#71717a" fontSize="5.5">{lbl}</text>
+      ))}
+
+      {/* ── Cabinet +01 INCOMER ── */}
+      <rect x={X1} y={BODY_Y} width={W1} height={CAB_H} fill="#0c1a2e" stroke="#06b6d4" strokeWidth="1.5" rx="2" />
+      <rect x={X1} y={BODY_Y} width={W1} height={HEADER_H} fill="rgba(6,182,212,0.12)" rx="2" />
+      <text x={X1 + W1/2} y={BODY_Y + 12} textAnchor="middle" fill="#06b6d4" fontSize="7.5" fontWeight="700" letterSpacing="0.8">+01 · INCOMER</text>
+      {/* feed line busbar → top of CT */}
+      <line x1={X1 + W1/2} y1={BUSBAR_Y} x2={X1 + W1/2} y2={BODY_Y + HEADER_H + 16} stroke="#06b6d4" strokeWidth="1.2" />
+      {/* CT ellipse */}
+      <ellipse cx={X1 + W1/2} cy={BODY_Y + HEADER_H + 25} rx={24} ry={9} fill="none" stroke="#06b6d4" strokeWidth="1.2" />
+      <text x={X1 + W1/2} y={BODY_Y + HEADER_H + 28} textAnchor="middle" fill="#06b6d4" fontSize="6">1000/1A</text>
+      <text x={X1 + 4} y={BODY_Y + HEADER_H + 23} fill="#4b5563" fontSize="5.5">CT</text>
+      {/* CT bottom → breaker top */}
+      <line x1={X1 + W1/2} y1={BODY_Y + HEADER_H + 34} x2={X1 + W1/2} y2={BODY_Y + HEADER_H + 48} stroke="#06b6d4" strokeWidth="1.2" />
+      {/* 3WA breaker */}
+      <rect x={X1 + W1/2 - 30} y={BODY_Y + HEADER_H + 48} width={60} height={52} rx="3" fill="none" stroke="#06b6d4" strokeWidth="1.5" />
+      <line x1={X1 + W1/2 - 30} y1={BODY_Y + HEADER_H + 48} x2={X1 + W1/2 + 30} y2={BODY_Y + HEADER_H + 100} stroke="#06b6d4" strokeWidth="0.8" opacity="0.4" />
+      <text x={X1 + W1/2} y={BODY_Y + HEADER_H + 68} textAnchor="middle" fill="#06b6d4" fontSize="8" fontWeight="700">3WA</text>
+      <text x={X1 + W1/2} y={BODY_Y + HEADER_H + 80} textAnchor="middle" fill="#06b6d4" fontSize="7">800 A · 4P</text>
+      <text x={X1 + W1/2} y={BODY_Y + HEADER_H + 91} textAnchor="middle" fill="#06b6d4" fontSize="6">55 kA</text>
+      {/* breaker → SENTRON PAC */}
+      <line x1={X1 + W1/2} y1={BODY_Y + HEADER_H + 100} x2={X1 + W1/2} y2={BODY_Y + HEADER_H + 110} stroke="#06b6d4" strokeWidth="1.2" />
+      {/* SENTRON PAC */}
+      <rect x={X1 + W1/2 - 34} y={BODY_Y + HEADER_H + 110} width={68} height={34} rx="3" fill="#0a2040" stroke="#06b6d4" strokeWidth="1" />
+      <text x={X1 + W1/2} y={BODY_Y + HEADER_H + 124} textAnchor="middle" fill="#06b6d4" fontSize="7" fontWeight="700">SENTRON PAC</text>
+      <text x={X1 + W1/2} y={BODY_Y + HEADER_H + 136} textAnchor="middle" fill="#06b6d4" fontSize="6.5" opacity="0.7">U · I · P</text>
+      {/* dashed cable down to generator entry */}
+      <line x1={X1 + W1/2} y1={BODY_Y + HEADER_H + 144} x2={X1 + W1/2} y2={BODY_Y + CAB_H - 22} stroke="#06b6d4" strokeWidth="1.2" strokeDasharray="3,2" />
+      <polygon fill="#06b6d4" points={`${X1+W1/2-5},${BODY_Y+CAB_H-22} ${X1+W1/2+5},${BODY_Y+CAB_H-22} ${X1+W1/2},${BODY_Y+CAB_H-12}`} />
+      <text x={X1 + W1/2} y={BODY_Y + CAB_H - 3} textAnchor="middle" fill="#4b5563" fontSize="6">From Generator</text>
+
+      {/* ── Cabinet +02 OUTGOING A (12 feeders, 2×6) ── */}
+      <rect x={X2} y={BODY_Y} width={W2} height={CAB_H} fill="#0c1a2e" stroke="#22c55e" strokeWidth="1.5" rx="2" />
+      <rect x={X2} y={BODY_Y} width={W2} height={HEADER_H} fill="rgba(34,197,94,0.08)" rx="2" />
+      <text x={X2 + W2/2} y={BODY_Y + 12} textAnchor="middle" fill="#22c55e" fontSize="7.5" fontWeight="700" letterSpacing="0.8">+02 · OUTGOING A</text>
+      <line x1={X2 + W2/2} y1={BUSBAR_Y} x2={X2 + W2/2} y2={BODY_Y + HEADER_H} stroke="#22c55e" strokeWidth="1.2" strokeDasharray="2,2" />
+      {F1_GEN_DP_FEEDERS_02.map((f, idx) => {
+        const col = idx % 2;
+        const row = Math.floor(idx / 2);
+        const cx  = X2 + 6 + col * (CW2 + 1);
+        const cy  = BODY_Y + HEADER_H + 4 + row * CELL_H;
+        const clr = KIND_CLR[f.kind] || '#52525b';
+        return (
+          <g key={f.slot || idx}>
+            <rect x={cx} y={cy} width={CW2} height={CELL_H - 2} rx="2" fill={`${clr}14`} stroke={clr} strokeWidth="0.6" />
+            <text x={cx + CW2/2} y={cy + 12} textAnchor="middle" fill={clr} fontSize="6.5" fontWeight="600">{f.label}</text>
+            <text x={cx + CW2/2} y={cy + 22} textAnchor="middle" fill={clr} fontSize="6" opacity="0.75">{f.rating}</text>
+            {f.slot && <text x={cx + 2} y={cy + CELL_H - 5} fill="#3f3f46" fontSize="5">{f.slot}</text>}
+          </g>
+        );
+      })}
+
+      {/* ── Cabinet +03 OUTGOING B (12 feeders, 2×6) ── */}
+      <rect x={X3} y={BODY_Y} width={W3} height={CAB_H} fill="#0c1a2e" stroke="#22c55e" strokeWidth="1.5" rx="2" />
+      <rect x={X3} y={BODY_Y} width={W3} height={HEADER_H} fill="rgba(34,197,94,0.08)" rx="2" />
+      <text x={X3 + W3/2} y={BODY_Y + 12} textAnchor="middle" fill="#22c55e" fontSize="7.5" fontWeight="700" letterSpacing="0.8">+03 · OUTGOING B</text>
+      <line x1={X3 + W3/2} y1={BUSBAR_Y} x2={X3 + W3/2} y2={BODY_Y + HEADER_H} stroke="#22c55e" strokeWidth="1.2" strokeDasharray="2,2" />
+      {F1_GEN_DP_FEEDERS_03.map((f, idx) => {
+        const col = idx % 2;
+        const row = Math.floor(idx / 2);
+        const cx  = X3 + 5 + col * (CW3 + 1);
+        const cy  = BODY_Y + HEADER_H + 4 + row * CELL_H;
+        const clr = KIND_CLR[f.kind] || '#52525b';
+        return (
+          <g key={`c3-${idx}`}>
+            <rect x={cx} y={cy} width={CW3} height={CELL_H - 2} rx="2" fill={`${clr}14`} stroke={clr} strokeWidth="0.6" />
+            <text x={cx + CW3/2} y={cy + 12} textAnchor="middle" fill={clr} fontSize="6" fontWeight="600">{f.label}</text>
+            <text x={cx + CW3/2} y={cy + 22} textAnchor="middle" fill={clr} fontSize="5.5" opacity="0.75">{f.rating}</text>
+          </g>
+        );
+      })}
+
+      {/* Legend */}
+      {[['#22c55e','Outgoing feeder'],['#f59e0b','Spare / Reserved'],['#3f3f46','Empty position']].map(([c,l], i) => (
+        <g key={l} transform={`translate(${PAD_X + i * 190}, ${BODY_Y + CAB_H + 14})`}>
+          <rect width={8} height={8} rx="1" y={-1} fill={`${c}20`} stroke={c} strokeWidth="0.8" />
+          <text x={12} y={7} fill="#71717a" fontSize="6.5">{l}</text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
 function ObjectDetailPanel({ node, allNodes, faultedIds, onClose, onSelect }) {
   const find = (id) => allNodes.find((n) => n.id === id);
   const parents         = (node.dependsOn || []).map(find).filter(Boolean);
@@ -1745,7 +1910,8 @@ function ObjectDetailPanel({ node, allNodes, faultedIds, onClose, onSelect }) {
 
   const numCabinets = node.properties?.num_cabinets ?? 1;
   const isSyncPanel = node.type === 'sync_panel';
-  const borderColor = node.status === 'fault' ? '#ef4444' : node.status === 'affected' ? '#f59e0b' : isSyncPanel ? '#06b6d4' : '#22c55e';
+  const isGenDp     = node.code?.endsWith('-GEN-DP');
+  const borderColor = node.status === 'fault' ? '#ef4444' : node.status === 'affected' ? '#f59e0b' : isSyncPanel ? '#06b6d4' : isGenDp ? '#22c55e' : '#22c55e';
   const Icon = iconFor(node.type_icon);
   const steps = TROUBLESHOOT_STEPS[node.type_category] || TROUBLESHOOT_STEPS.control;
 
@@ -1929,6 +2095,55 @@ function ObjectDetailPanel({ node, allNodes, faultedIds, onClose, onSelect }) {
                 : <div className="space-y-1.5">{downstream.map((p) => <DependencyRow key={p.id} node={p} />)}</div>}
             </section>
 
+            {isGenDp && (
+              <>
+                <section>
+                  <h3 className="text-[10px] font-bold tracking-[0.18em] uppercase text-emerald-400/80 mb-2 flex items-center gap-1.5">
+                    <CircuitBoard size={11} /> Switchgear Specifications
+                  </h3>
+                  <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                    {Object.entries(GEN_DP_TECH).map(([k, v]) => (
+                      <div key={k} className="rounded border border-white/5 bg-white/[0.02] px-2 py-1.5">
+                        <div className="text-[9px] text-zinc-500 uppercase tracking-widest">{k.replace(/([A-Z])/g, ' $1').trim()}</div>
+                        <div className="text-zinc-200 font-medium mt-0.5">{v}</div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section>
+                  <h3 className="text-[10px] font-bold tracking-[0.18em] uppercase text-emerald-400/80 mb-2 flex items-center gap-1.5">
+                    <Layers size={11} /> Outgoing Feeders ({F1_GEN_DP_FEEDERS_02.length + F1_GEN_DP_FEEDERS_03.length})
+                  </h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[10px]">
+                      <thead>
+                        <tr className="border-b border-white/5">
+                          <th className="text-left py-1 px-1.5 text-zinc-500 font-medium">Cab.</th>
+                          <th className="text-left py-1 px-1.5 text-zinc-500 font-medium">Slot</th>
+                          <th className="text-left py-1 px-1.5 text-zinc-500 font-medium">Circuit</th>
+                          <th className="text-left py-1 px-1.5 text-zinc-500 font-medium">Rating</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...F1_GEN_DP_FEEDERS_02.map(f => ({...f, cab: '+02'})), ...F1_GEN_DP_FEEDERS_03.map(f => ({...f, cab: '+03'}))].map((f, i) => {
+                          const clsCls = f.kind === 'out' ? 'text-emerald-300 bg-emerald-500/10' : f.kind === 'spare' ? 'text-amber-300 bg-amber-500/10' : 'text-zinc-500 bg-zinc-500/10';
+                          return (
+                            <tr key={i} className="border-b border-white/[0.03] hover:bg-white/[0.02]">
+                              <td className="py-1 px-1.5 font-mono text-zinc-500">{f.cab}</td>
+                              <td className="py-1 px-1.5 font-mono text-zinc-400">{f.slot || '—'}</td>
+                              <td className="py-1 px-1.5 text-zinc-200 font-medium">{f.label}</td>
+                              <td className="py-1 px-1.5"><span className={`px-1 py-0.5 rounded text-[9px] font-bold ${clsCls}`}>{f.rating}</span></td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </>
+            )}
+
             {isSyncPanel && (
               <>
                 <section>
@@ -2002,14 +2217,16 @@ function ObjectDetailPanel({ node, allNodes, faultedIds, onClose, onSelect }) {
           </div>
         </ScrollArea>
 
-        {/* Right — single-line diagram for sync panels, placeholder for others */}
+        {/* Right — elevation / single-line drawing */}
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="px-5 py-3 border-b border-white/5 flex items-center shrink-0">
             <span className="text-[11px] font-bold tracking-widest uppercase text-zinc-500">
-              {isSyncPanel ? 'Single-Line Diagram' : 'Cabinet Drawing'}
+              {isSyncPanel || isGenDp ? 'Front Elevation' : 'Cabinet Drawing'}
             </span>
             {isSyncPanel
               ? <Badge className="text-[9px] bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 ml-auto">SIVACON S8 · P25-0001-P006</Badge>
+              : isGenDp
+              ? <Badge className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 ml-auto">SIVACON S8 · P25-0001-P023</Badge>
               : <Badge variant="outline" className="text-[9px] border-white/10 text-zinc-600 ml-auto">placeholder</Badge>
             }
           </div>
@@ -2020,6 +2237,15 @@ function ObjectDetailPanel({ node, allNodes, faultedIds, onClose, onSelect }) {
                 <SyncPanelOneLine />
                 <p className="text-[9px] text-zinc-600 mt-2 text-center font-mono">
                   Front elevation · DNT-GROUP P25-0001-P006 rev R2 · 23.07.2025
+                </p>
+              </div>
+            </div>
+          ) : isGenDp ? (
+            <div className="flex-1 overflow-auto">
+              <div className="p-5" style={{ minWidth: 'max-content' }}>
+                <GenDpElevation />
+                <p className="text-[9px] text-zinc-600 mt-2 text-center font-mono">
+                  Front elevation · DNT-GROUP P25-0001-P023 rev M0 · 14.11.2025
                 </p>
               </div>
             </div>
