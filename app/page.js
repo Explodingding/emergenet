@@ -2282,7 +2282,7 @@ export default function HomePage() {
 
   const [detailNode, setDetailNode] = useState(null);
   const handleSelect = useCallback((n) => {
-    if ((n.properties?.num_cabinets ?? 1) >= 3) {
+    if ((n.properties?.num_cabinets ?? 1) >= 3 || n.code?.endsWith('-GEN-DP')) {
       setDetailNode(n);
     } else {
       setSelected(n);
