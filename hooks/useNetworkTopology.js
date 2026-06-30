@@ -116,6 +116,7 @@ function reshape({ floors, object_types, objects, dependencies }) {
     .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0))
     .map((b) => ({
       id: b.code,
+      uuid: b.id,   // preserve Supabase UUID for INSERT statements
       code: b.code,
       name: b.name,
       description: b.description,
@@ -137,6 +138,8 @@ function reshape({ floors, object_types, objects, dependencies }) {
   const monitorsMap = new Map();
   const backupForMap = new Map();  // backup source -> [target codes]
   const backedUpByMap = new Map(); // target -> [backup source codes]
+  const synchronizesMap = new Map();   // sync panel code -> [generator codes]
+  const synchronizedByMap = new Map(); // generator code -> [sync panel codes]
 
   for (const d of dependencies) {
     if (d.is_active === false) continue;
@@ -159,6 +162,11 @@ function reshape({ floors, object_types, objects, dependencies }) {
       backupForMap.get(src.code).push(tgt.code);
       if (!backedUpByMap.has(tgt.code)) backedUpByMap.set(tgt.code, []);
       backedUpByMap.get(tgt.code).push(src.code);
+    } else if (d.relation === 'synchronizes') {
+      if (!synchronizesMap.has(src.code)) synchronizesMap.set(src.code, []);
+      synchronizesMap.get(src.code).push(tgt.code);
+      if (!synchronizedByMap.has(tgt.code)) synchronizedByMap.set(tgt.code, []);
+      synchronizedByMap.get(tgt.code).push(src.code);
     }
   }
 
@@ -178,17 +186,20 @@ function reshape({ floors, object_types, objects, dependencies }) {
 
       // Resolve coordinates: use room anchors for unpositioned objects (0,0)
       const { x: cx, y: cy } = resolveCoordsCm(o, b);
-      // Apply spread within the room cell (120 cm grid spacing)
-      const SPREAD = 120;
-      const cols = Math.max(1, Math.ceil(Math.sqrt(groupSize)));
-      const col = indexInGroup % cols;
-      const row = Math.floor(indexInGroup / cols);
-      const spreadX = (col - (cols - 1) / 2) * SPREAD;
-      const spreadY = (row - (Math.ceil(groupSize / cols) - 1) / 2) * SPREAD;
+      const hasExplicitCoords = o.coord_x !== 0 || o.coord_y !== 0;
 
-      // Final coordinates — clamp inside building bounds
-      let finalX = cx + spreadX;
-      let finalY = cy + spreadY;
+      // Spread only applies to unpositioned objects sharing a room anchor.
+      // Objects with explicit stored coordinates are placed exactly as-is.
+      let finalX = cx;
+      let finalY = cy;
+      if (!hasExplicitCoords) {
+        const SPREAD = 120;
+        const cols = Math.max(1, Math.ceil(Math.sqrt(groupSize)));
+        const col = indexInGroup % cols;
+        const row = Math.floor(indexInGroup / cols);
+        finalX = cx + (col - (cols - 1) / 2) * SPREAD;
+        finalY = cy + (row - (Math.ceil(groupSize / cols) - 1) / 2) * SPREAD;
+      }
       if (b) {
         const margin = 50;
         finalX = Math.max(b.bounds_x + margin, Math.min(b.bounds_x + b.bounds_w - margin, finalX));
@@ -218,6 +229,8 @@ function reshape({ floors, object_types, objects, dependencies }) {
         monitors: monitorsMap.get(o.code) || [],
         backupFor: backupForMap.get(o.code) || [],
         backedUpBy: backedUpByMap.get(o.code) || [],
+        synchronizes: synchronizesMap.get(o.code) || [],
+        synchronizedBy: synchronizedByMap.get(o.code) || [],
         rating: extractRating(o.properties),
         voltage: extractVoltage(o.properties),
         installed: o.properties?.installed || null,
