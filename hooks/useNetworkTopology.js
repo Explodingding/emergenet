@@ -218,6 +218,7 @@ function reshape({ floors, object_types, objects, dependencies }) {
         building_name: b?.name || '',
         floor: fl?.name || 'Level 0 m',
         floor_level: fl?.level ?? 0,
+        floor_elevation: fl?.elevation_m ?? 0,
         coordinates: { x: finalX / CM_PER_PX, y: finalY / CM_PER_PX },
         coord_cm: { x: finalX, y: finalY },
         location_code: o.properties?.location_code || null,

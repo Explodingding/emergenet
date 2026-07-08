@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getFloorPlan } from '../lib/building-rooms';
+import { getFloorPlan, getFloorPlanWallBBox } from '../lib/building-rooms';
 import { getSiteBackground, hasSiteBackgroundFor } from '../lib/site-backgrounds';
 import Link from 'next/link';
 import {
@@ -45,6 +45,7 @@ import {
   Copy,
   Check,
   GitMerge,
+  Share2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -358,18 +359,76 @@ function SiteBackground({ selectedFloor }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Inline-SVG floor plans (crisp at any zoom)
+// ---------------------------------------------------------------------------
+// An SVG loaded via <img> gets rasterized to a fixed-size bitmap the moment
+// it's painted; our canvas zooms via a CSS `transform: scale(...)` on an
+// ancestor, so zooming in just stretches that bitmap — hence the blur that
+// gets worse the further you zoom. Fetching the raw markup and injecting it
+// as real DOM (<path> elements) keeps it vector, so it stays sharp at any
+// zoom level. Cached module-wide since these are static files fetched once.
+const svgMarkupCache = new Map();
+
+function prepareInlineSvg(svgText) {
+  // Drop the root <svg>'s own width/height so our wrapper div's CSS
+  // width/height (driven by the same math the old <img> used) controls
+  // sizing — the viewBox still defines the coordinate system, so scaling
+  // stays correct.
+  return svgText.replace(/<svg\b([^>]*)>/, (_, attrs) => {
+    const cleaned = attrs.replace(/\s(width|height)="[^"]*"/g, '');
+    return `<svg${cleaned} style="width:100%;height:100%;display:block">`;
+  });
+}
+
+function useSvgMarkup(src) {
+  const [markup, setMarkup] = useState(() => (src ? svgMarkupCache.get(src) || null : null));
+  useEffect(() => {
+    if (!src) { setMarkup(null); return; }
+    const cached = svgMarkupCache.get(src);
+    if (cached) { setMarkup(cached); return; }
+    let cancelled = false;
+    fetch(src)
+      .then((r) => r.text())
+      .then((text) => {
+        const prepared = prepareInlineSvg(text);
+        svgMarkupCache.set(src, prepared);
+        if (!cancelled) setMarkup(prepared);
+      })
+      .catch(() => {}); // fall back to no overlay rather than crash
+    return () => { cancelled = true; };
+  }, [src]);
+  return markup;
+}
+
 function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom, selectedFloor, hasSiteBackground }) {
   const { bounds } = building;
   const safeZoom = zoom || 1;
 
-  // ── Hide building if it doesn't exist on the selected floor ─────────────
-  if (selectedFloor && building.floors && !building.floors.includes(selectedFloor)) return null;
+  const floorMatches = !selectedFloor || !building.floors || building.floors.includes(selectedFloor);
 
   // ── Level-of-detail based on the SMALLER rendered dimension ──────────────
   const minPx = Math.min(bounds.w, bounds.h) * safeZoom;
-  if (minPx < LOD_MINI) return null;  // too small to show at all
+  const lod = minPx < LOD_MINI ? 'hidden' : minPx >= LOD_FULL ? 'full' : minPx >= LOD_SIMPLE ? 'simple' : 'mini';
 
-  const lod = minPx >= LOD_FULL ? 'full' : minPx >= LOD_SIMPLE ? 'simple' : 'mini';
+  // Skip the per-building overlay when the site background already covers this
+  // building (avoids drawing two plans on top of each other).
+  const floorPlanSrc =
+    floorMatches && lod !== 'mini' && lod !== 'hidden' && !hasSiteBackground
+      ? getFloorPlan(building.code, selectedFloor)
+      : null;
+  // When set, the overlay is scaled/positioned so this wall box (not the
+  // full image) fits bounds.w x bounds.h — stairs/canopies outside the box
+  // overflow past the building's border instead of being squeezed inside it.
+  const wallBBox = floorPlanSrc ? getFloorPlanWallBBox(building.code, selectedFloor) : null;
+  // Hooks must run unconditionally on every render, so this is called before
+  // any early return below (even when floorPlanSrc is null — the hook itself
+  // handles that by skipping the fetch).
+  const svgMarkup = useSvgMarkup(floorPlanSrc && floorPlanSrc.endsWith('.svg') ? floorPlanSrc : null);
+
+  // ── Hide building if it doesn't exist on the selected floor, or is too
+  // small to show at all ──────────────────────────────────────────────────
+  if (!floorMatches || lod === 'hidden') return null;
 
   const borderColor = hasFault
     ? 'border-red-500/50'
@@ -392,12 +451,6 @@ function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom, select
       />
     );
   }
-
-  // ── SIMPLE / FULL ────────────────────────────────────────────────────────
-  // Skip the per-building overlay when the site background already covers this
-  // building (avoids drawing two plans on top of each other).
-  const floorPlanSrc =
-    lod !== 'mini' && !hasSiteBackground ? getFloorPlan(building.code, selectedFloor) : null;
 
   return (
     // Outer wrapper: no overflow-hidden so the label can float above the border
@@ -462,15 +515,27 @@ function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom, select
           )}
         </AnimatePresence>
 
-        {/* CAD floor plan — shown automatically when an image exists for this building+floor */}
-        {floorPlanSrc && (
-          <img
-            src={floorPlanSrc}
-            alt={`${building.name} floor plan`}
-            className="absolute inset-0 w-full h-full pointer-events-none select-none"
-            style={{ objectFit: 'fill', opacity: 0.9, mixBlendMode: 'multiply' }}
-            draggable={false}
-          />
+        {/* CAD floor plan — shown automatically when an image exists for this building+floor.
+            Only rendered here (clipped to the rounded box) when there's no wall bbox;
+            the wall-bbox version renders unclipped on the outer wrapper below instead.
+            Inline SVG markup (not <img>) so it stays vector-sharp at any zoom level;
+            falls back to <img> for non-SVG overlays or while the markup is fetching. */}
+        {floorPlanSrc && !wallBBox && (
+          svgMarkup ? (
+            <div
+              className="absolute inset-0 pointer-events-none select-none"
+              style={{ opacity: 0.9, mixBlendMode: 'multiply' }}
+              dangerouslySetInnerHTML={{ __html: svgMarkup }}
+            />
+          ) : (
+            <img
+              src={floorPlanSrc}
+              alt={`${building.name} floor plan`}
+              className="absolute inset-0 w-full h-full pointer-events-none select-none"
+              style={{ objectFit: 'fill', opacity: 0.9, mixBlendMode: 'multiply' }}
+              draggable={false}
+            />
+          )
         )}
 
         {/* Corner brackets */}
@@ -481,6 +546,62 @@ function BuildingZone({ building, hasFault, hasAffected, nodeCount, zoom, select
           />
         ))}
       </div>
+
+      {/* Wall-fit floor plan — scaled so wallBBox (not the full image) matches
+          bounds.w x bounds.h exactly; stairs/canopies outside that box overflow
+          past the building's border on purpose (outer wrapper has no overflow-hidden). */}
+      {floorPlanSrc && wallBBox && (() => {
+        let left, top, width, height;
+        if (wallBBox.free) {
+          // Free placement: image width = fraction of building width, uniform
+          // scale, anchored horizontally, vertically centered — so a tall plan
+          // (e.g. vertical galleries) overflows past the top & bottom edges.
+          width = wallBBox.widthFracOfBuilding * bounds.w;
+          const s = width / wallBBox.naturalW;
+          height = wallBBox.naturalH * s;
+          left = wallBBox.anchorX === 'right' ? bounds.w - width : 0;
+          top = wallBBox.centerY ? (bounds.h - height) / 2 : 0;
+        } else {
+          // Wall-fit: scale so wallBBox (not the full image) matches the box.
+          const scaleY = bounds.h / wallBBox.h;
+          // uniform: keep true aspect (both axes from height) so a horizontal
+          // strip overflows sideways instead of stretching to fill the box.
+          const scaleX = wallBBox.uniform ? scaleY : bounds.w / wallBBox.w;
+          left = -wallBBox.x * scaleX;
+          top = -wallBBox.y * scaleY;
+          width = wallBBox.naturalW * scaleX;
+          height = wallBBox.naturalH * scaleY;
+        }
+        const sizeStyle = {
+          left,
+          top,
+          width,
+          height,
+          // Tailwind Preflight sets img{max-width:100%;height:auto} — override
+          // it so the overlay can exceed the building box and overflow past it.
+          maxWidth: 'none',
+          maxHeight: 'none',
+          opacity: 0.9,
+          mixBlendMode: 'multiply',
+        };
+        // Inline SVG markup (not <img>) so it stays vector-sharp at any zoom
+        // level instead of being rasterized once and blurrily stretched.
+        return svgMarkup ? (
+          <div
+            className="absolute pointer-events-none select-none"
+            style={sizeStyle}
+            dangerouslySetInnerHTML={{ __html: svgMarkup }}
+          />
+        ) : (
+          <img
+            src={floorPlanSrc}
+            alt={`${building.name} floor plan`}
+            className="absolute pointer-events-none select-none"
+            style={sizeStyle}
+            draggable={false}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -2375,6 +2496,7 @@ export default function HomePage() {
 
   // Placement tool state
   const [placeModeActive, setPlaceModeActive] = useState(false);
+  const [showCables, setShowCables] = useState(true);
   const [placeTarget, setPlaceTarget] = useState(null);
   const [placements, setPlacements] = useState([]);
   const [cursorCm, setCursorCm] = useState(null);
@@ -2411,11 +2533,14 @@ export default function HomePage() {
     const floorMap = new Map();
     for (const n of computed) {
       if (!floorMap.has(n.floor)) {
-        floorMap.set(n.floor, { name: n.floor, level: n.floor_level, count: 0 });
+        floorMap.set(n.floor, { name: n.floor, level: n.floor_level, elevation: n.floor_elevation, count: 0 });
       }
       floorMap.get(n.floor).count += 1;
     }
-    return Array.from(floorMap.values()).sort((a, b) => a.level - b.level);
+    // Sort by real elevation, not the DB `level` int — that int is only
+    // consistent within a single building, so mixing buildings with
+    // different floor sets (e.g. BTR-01's "Level 14 m") breaks a level-based sort.
+    return Array.from(floorMap.values()).sort((a, b) => a.elevation - b.elevation);
   }, [computed]);
 
   // Whether a site-wide plan backdrop is active (makes building fills
@@ -2688,6 +2813,175 @@ export default function HomePage() {
                 ))}
               </div>
 
+              {/* ── Cable connections layer ── */}
+              {showCables && (() => {
+                // Only draw cables between endpoints both physically present
+                // on the selected floor — cross-floor runs are covered by
+                // the ghost-marker layer instead. "All floors" shows everything.
+                const nodeMap = new Map(visibleNodes.map(n => [n.id, n]));
+                const pairs = [];
+                const seen = new Set();
+                for (const n of visibleNodes) {
+                  for (const parentId of (n.dependsOn || [])) {
+                    const parent = nodeMap.get(parentId);
+                    if (!parent) continue;
+                    const key = `${parentId}→${n.id}`;
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    pairs.push({ src: parent, dst: n });
+                  }
+                }
+                return (
+                  <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 3, overflow: 'visible' }}>
+                    <defs>
+                      <marker id="ca-arr" markerWidth="7" markerHeight="7" refX="3.5" refY="3.5" orient="auto">
+                        <path d="M1,1 L6,3.5 L1,6 Z" fill="rgba(148,163,184,0.75)" />
+                      </marker>
+                      <marker id="ca-arr-fault" markerWidth="7" markerHeight="7" refX="3.5" refY="3.5" orient="auto">
+                        <path d="M1,1 L6,3.5 L1,6 Z" fill="rgba(239,68,68,0.85)" />
+                      </marker>
+                      <marker id="ca-arr-affected" markerWidth="7" markerHeight="7" refX="3.5" refY="3.5" orient="auto">
+                        <path d="M1,1 L6,3.5 L1,6 Z" fill="rgba(245,158,11,0.85)" />
+                      </marker>
+                    </defs>
+                    {pairs.map(({ src, dst }) => {
+                      const x1 = src.coordinates.x * zoom + offset.x;
+                      const y1 = src.coordinates.y * zoom + offset.y;
+                      const x2 = dst.coordinates.x * zoom + offset.x;
+                      const y2 = dst.coordinates.y * zoom + offset.y;
+                      const mx = (x1 + x2) / 2;
+                      const my = (y1 + y2) / 2;
+                      const isFault    = src.status === 'fault'    || dst.status === 'fault';
+                      const isAffected = src.status === 'affected' || dst.status === 'affected';
+                      const stroke = isFault ? 'rgba(239,68,68,0.55)' : isAffected ? 'rgba(245,158,11,0.45)' : 'rgba(148,163,184,0.35)';
+                      const sw     = isFault || isAffected ? 1.5 : 1.2;
+                      const arrow  = isFault ? 'url(#ca-arr-fault)' : isAffected ? 'url(#ca-arr-affected)' : 'url(#ca-arr)';
+                      return (
+                        <polyline key={`cable-${src.id}-${dst.id}`}
+                          points={`${x1},${y1} ${mx},${my} ${x2},${y2}`}
+                          fill="none"
+                          stroke={stroke}
+                          strokeWidth={sw}
+                          markerMid={arrow}
+                        />
+                      );
+                    })}
+                  </svg>
+                );
+              })()}
+
+              {/* ── Fault propagation lines ── */}
+              {faultedIds.size > 0 && (() => {
+                const nodeMap = new Map(nodes.map(n => [n.id, n]));
+                const pairs = [];
+                const seen = new Set();
+                for (const n of nodes) {
+                  if (n.status !== 'fault' && n.status !== 'affected') continue;
+                  for (const pid of (n.dependsOn || [])) {
+                    const p = nodeMap.get(pid);
+                    if (!p || (p.status !== 'fault' && p.status !== 'affected')) continue;
+                    const key = `${pid}→${n.id}`;
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    pairs.push({ src: p, dst: n, isFault: p.status === 'fault' || n.status === 'fault' });
+                  }
+                }
+                return (
+                  <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 5, overflow: 'visible' }}>
+                    <defs>
+                      <filter id="fl-glow-red" x="-50%" y="-50%" width="200%" height="200%">
+                        <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="b" />
+                        <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+                      </filter>
+                      <filter id="fl-glow-amb" x="-50%" y="-50%" width="200%" height="200%">
+                        <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="b" />
+                        <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+                      </filter>
+                    </defs>
+                    {pairs.map(({ src, dst, isFault }) => {
+                      const x1 = src.coordinates.x * zoom + offset.x;
+                      const y1 = src.coordinates.y * zoom + offset.y;
+                      const x2 = dst.coordinates.x * zoom + offset.x;
+                      const y2 = dst.coordinates.y * zoom + offset.y;
+                      const col  = isFault ? '#ef4444' : '#f59e0b';
+                      const glow = isFault ? 'url(#fl-glow-red)' : 'url(#fl-glow-amb)';
+                      const spd  = isFault ? '0.55s' : '1.1s';
+                      return (
+                        <g key={`${src.id}-${dst.id}`}>
+                          {/* glow halo */}
+                          <line x1={x1} y1={y1} x2={x2} y2={y2}
+                                stroke={col} strokeWidth={6} opacity={0.18} filter={glow} />
+                          {/* animated dash */}
+                          <line x1={x1} y1={y1} x2={x2} y2={y2}
+                                stroke={col} strokeWidth={1.5} opacity={0.85}
+                                strokeDasharray="7 5"
+                                style={{ animation: `fault-dash ${spd} linear infinite` }} />
+                        </g>
+                      );
+                    })}
+                  </svg>
+                );
+              })()}
+
+              {/* ── Ghost markers: fault/affected nodes on other floors ── */}
+              {selectedFloor !== null && faultedIds.size > 0 && (() => {
+                const ghosts = computed.filter(n =>
+                  n.floor !== selectedFloor &&
+                  (n.status === 'fault' || n.status === 'affected')
+                );
+                if (!ghosts.length) return null;
+                return (
+                  <div className="absolute inset-0 pointer-events-none overflow-hidden">
+                    {ghosts.map(node => {
+                      const sx = node.coordinates.x * zoom + offset.x;
+                      const sy = node.coordinates.y * zoom + offset.y;
+                      const isFault = node.status === 'fault';
+                      const col = isFault ? '#ef4444' : '#f59e0b';
+                      const floorShort = node.floor.replace('Level ', '').trim();
+                      return (
+                        <div
+                          key={`ghost-${node.id}`}
+                          className="absolute pointer-events-auto"
+                          style={{ left: sx, top: sy, transform: 'translate(-50%,-50%)' }}
+                          title={`${node.id} · ${node.floor} — click to switch floor`}
+                          onClick={() => setSelectedFloor(node.floor)}
+                        >
+                          {/* floor badge above */}
+                          <div style={{
+                            position: 'absolute', bottom: '100%', left: '50%',
+                            transform: 'translateX(-50%) translateY(-2px)',
+                            background: '#09090b', border: `1px solid ${col}55`,
+                            borderRadius: 3, padding: '0 5px', lineHeight: '14px',
+                            fontSize: 8, fontFamily: 'monospace', color: col,
+                            whiteSpace: 'nowrap', opacity: 0.85,
+                          }}>
+                            {floorShort}
+                          </div>
+                          {/* dashed ghost circle */}
+                          <div style={{
+                            width: 18, height: 18, borderRadius: '50%',
+                            border: `1.5px dashed ${col}`,
+                            background: `${col}18`,
+                            opacity: 0.55,
+                          }} />
+                          {/* node id below */}
+                          <div style={{
+                            position: 'absolute', top: '100%', left: '50%',
+                            transform: 'translateX(-50%) translateY(2px)',
+                            background: '#09090bcc', borderRadius: 3,
+                            padding: '0 4px', lineHeight: '13px',
+                            fontSize: 8, fontFamily: 'monospace',
+                            color: '#71717a', whiteSpace: 'nowrap',
+                          }}>
+                            {node.id}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
               {/* ── Screen-space overlay: node markers ──────────────────────
                    Rendered outside the CSS transform so markers are rasterised
                    at their native pixel size — sharp at every zoom level.
@@ -2737,6 +3031,14 @@ export default function HomePage() {
                 title="Toggle object placement mode"
               >
                 <MapPin size={14} />
+              </button>
+              <div className="h-px bg-white/5 my-0.5" />
+              <button
+                onClick={() => setShowCables(v => !v)}
+                className={`h-8 w-8 rounded-md flex items-center justify-center transition-colors ${showCables ? 'bg-sky-500/20 text-sky-300 border border-sky-500/35' : 'hover:bg-white/5 text-zinc-500'}`}
+                title="Toggle cable connections"
+              >
+                <Share2 size={14} />
               </button>
               <div className="text-[9px] text-zinc-500 font-mono text-center pt-1 pb-0.5">
                 {Math.round(zoom * 100)}%
