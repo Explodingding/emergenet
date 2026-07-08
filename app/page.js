@@ -2728,6 +2728,67 @@ export default function HomePage() {
     setZoom(next);
   }, [zoom]);
 
+  // ── Touch: 1-finger pan, 2-finger pinch-zoom (mobile) ──────────────────
+  // touchRef persists across renders without retriggering effects — mirrors
+  // dragStartRef's role for mouse panning, plus pinch-specific start state
+  // captured once per gesture so zoom scales smoothly relative to gesture
+  // start (not incrementally re-based every touchmove frame).
+  const touchRef = React.useRef({ mode: null });
+
+  const touchDist = (t0, t1) => Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+  const touchMid = (t0, t1, rect) => ({
+    x: (t0.clientX + t1.clientX) / 2 - rect.left,
+    y: (t0.clientY + t1.clientY) / 2 - rect.top,
+  });
+
+  const onTouchStart = useCallback((e) => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (e.touches.length === 1) {
+      touchRef.current = { mode: 'pan' };
+      dragMovedRef.current = false;
+      setIsDragging(true);
+      dragStartRef.current = { x: e.touches[0].clientX - offset.x, y: e.touches[0].clientY - offset.y };
+    } else if (e.touches.length === 2) {
+      const rect = el.getBoundingClientRect();
+      touchRef.current = {
+        mode: 'pinch',
+        startDist: touchDist(e.touches[0], e.touches[1]),
+        startZoom: zoom,
+        startOffset: offset,
+        mid: touchMid(e.touches[0], e.touches[1], rect),
+      };
+      setIsDragging(false);
+    }
+  }, [offset, zoom]);
+
+  const onTouchMove = useCallback((e) => {
+    const t = touchRef.current;
+    if (t.mode === 'pan' && e.touches.length === 1) {
+      dragMovedRef.current = true;
+      setOffset({ x: e.touches[0].clientX - dragStartRef.current.x, y: e.touches[0].clientY - dragStartRef.current.y });
+    } else if (t.mode === 'pinch' && e.touches.length === 2) {
+      const dist = touchDist(e.touches[0], e.touches[1]);
+      const next = Math.max(minZoomRef.current, Math.min(MAX_ZOOM, t.startZoom * (dist / t.startDist)));
+      const k = next / t.startZoom;
+      setOffset({ x: t.mid.x - (t.mid.x - t.startOffset.x) * k, y: t.mid.y - (t.mid.y - t.startOffset.y) * k });
+      setZoom(next);
+    }
+  }, []);
+
+  const onTouchEnd = useCallback((e) => {
+    if (e.touches.length === 0) {
+      touchRef.current = { mode: null };
+      setIsDragging(false);
+    } else if (e.touches.length === 1) {
+      // Lifted one finger out of a pinch — resume as a plain pan from here.
+      touchRef.current = { mode: 'pan' };
+      dragMovedRef.current = false;
+      setIsDragging(true);
+      dragStartRef.current = { x: e.touches[0].clientX - offset.x, y: e.touches[0].clientY - offset.y };
+    }
+  }, [offset]);
+
   const signOut = async () => {
     await createClient().auth.signOut();
   };
@@ -2784,6 +2845,10 @@ export default function HomePage() {
               onMouseMove={onMouseMove}
               onMouseUp={stopDrag}
               onMouseLeave={stopDrag}
+              onTouchStart={onTouchStart}
+              onTouchMove={onTouchMove}
+              onTouchEnd={onTouchEnd}
+              onTouchCancel={onTouchEnd}
               className={`absolute inset-0 overflow-hidden bg-white ${placeModeActive ? 'cursor-crosshair' : isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
               style={{ touchAction: 'none' }}
             >
@@ -2854,7 +2919,7 @@ export default function HomePage() {
                       const isFault    = src.status === 'fault'    || dst.status === 'fault';
                       const isAffected = src.status === 'affected' || dst.status === 'affected';
                       const stroke = isFault ? 'rgba(239,68,68,0.55)' : isAffected ? 'rgba(245,158,11,0.45)' : 'rgba(148,163,184,0.35)';
-                      const sw     = isFault || isAffected ? 1.5 : 1.2;
+                      const sw     = isFault || isAffected ? 3.2 : 2.6;
                       const arrow  = isFault ? 'url(#ca-arr-fault)' : isAffected ? 'url(#ca-arr-affected)' : 'url(#ca-arr)';
                       return (
                         <polyline key={`cable-${src.id}-${dst.id}`}
@@ -2919,6 +2984,37 @@ export default function HomePage() {
                         </g>
                       );
                     })}
+                    {/* One hop upstream from each root-injected fault, even though
+                        that parent is healthy — shows what feeds the faulted item
+                        (distinct calmer styling: no glow, no animation, since the
+                        parent itself isn't affected, just providing context). */}
+                    {(() => {
+                      const upstreamPairs = [];
+                      const upSeen = new Set();
+                      for (const n of nodes) {
+                        if (n.status !== 'fault') continue;
+                        for (const pid of (n.dependsOn || [])) {
+                          const p = nodeMap.get(pid);
+                          if (!p || p.status === 'fault' || p.status === 'affected') continue; // already drawn above
+                          const key = `${pid}→${n.id}`;
+                          if (upSeen.has(key)) continue;
+                          upSeen.add(key);
+                          upstreamPairs.push({ src: p, dst: n });
+                        }
+                      }
+                      return upstreamPairs.map(({ src, dst }) => {
+                        const x1 = src.coordinates.x * zoom + offset.x;
+                        const y1 = src.coordinates.y * zoom + offset.y;
+                        const x2 = dst.coordinates.x * zoom + offset.x;
+                        const y2 = dst.coordinates.y * zoom + offset.y;
+                        return (
+                          <line key={`up-${src.id}-${dst.id}`}
+                                x1={x1} y1={y1} x2={x2} y2={y2}
+                                stroke="#94a3b8" strokeWidth={1.5} opacity={0.7}
+                                strokeDasharray="4 4" />
+                        );
+                      });
+                    })()}
                   </svg>
                 );
               })()}
