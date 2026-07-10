@@ -87,6 +87,11 @@ node_modules/@next/swc-linux-arm64-musl/next-swc.linux-arm64-musl.node
 .env.local
 .env*.local
 
+# Supabase local CLI state & DB backups (dumps may contain live data)
+/supabase/.branches
+/supabase/.temp
+/backups/
+
 # Large CAD source files & scratch render outputs (session work)
 *.dxf
 *.dwf

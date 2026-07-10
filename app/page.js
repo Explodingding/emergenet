@@ -46,6 +46,11 @@ import {
   Check,
   GitMerge,
   Share2,
+  History,
+  FileText,
+  Clock,
+  Download,
+  BarChart3,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -56,6 +61,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { computeNetworkStatus, downstreamOf } from '@/lib/network-utils';
 import { useNetworkTopology, CM_PER_PX } from '@/hooks/useNetworkTopology';
+import { useFaultHistory } from '@/hooks/useFaultHistory';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { createClient } from '@/lib/supabase/client';
 
@@ -623,6 +629,7 @@ const CAT_SHORT = {
 // Fault simulator panel
 // =====================================================================
 function FaultPanel({ buildings, nodes, faultedIds, onInject, onClear, onSelect, selectedId, collapsed, onToggle }) {
+  const [tab, setTab] = useState('live'); // 'live' | 'history'
   const [query, setQuery] = useState('');
   const [activeBldg, setActiveBldg] = useState(null);   // building code filter
   const [activeCat, setActiveCat] = useState(null);     // category filter
@@ -716,17 +723,40 @@ function FaultPanel({ buildings, nodes, faultedIds, onInject, onClear, onSelect,
               )}
             </div>
 
-            <Button
-              variant="destructive"
-              size="sm"
-              disabled={faultedIds.size === 0}
-              onClick={onClear}
-              className="w-full h-7 text-xs"
-            >
-              <RotateCcw size={12} className="mr-1.5" /> Clear All Faults
-            </Button>
+            {/* Live / History tabs */}
+            <div className="flex gap-1 p-0.5 rounded-md bg-white/[0.03] border border-white/5">
+              <button
+                onClick={() => setTab('live')}
+                className={`flex-1 h-6 rounded-sm text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 transition-colors ${
+                  tab === 'live' ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                <Zap size={11} /> Live
+              </button>
+              <button
+                onClick={() => setTab('history')}
+                className={`flex-1 h-6 rounded-sm text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 transition-colors ${
+                  tab === 'history' ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                <History size={11} /> History
+              </button>
+            </div>
+
+            {tab === 'live' && (
+              <Button
+                variant="destructive"
+                size="sm"
+                disabled={faultedIds.size === 0}
+                onClick={onClear}
+                className="w-full h-7 text-xs"
+              >
+                <RotateCcw size={12} className="mr-1.5" /> Clear All Faults
+              </Button>
+            )}
 
             {/* Search */}
+            {tab === 'live' && (
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" size={12} />
               <Input
@@ -744,8 +774,10 @@ function FaultPanel({ buildings, nodes, faultedIds, onInject, onClear, onSelect,
                 </button>
               )}
             </div>
+            )}
 
             {/* Building filter pills — wrap on multiple rows */}
+            {tab === 'live' && (
             <div className="flex flex-wrap gap-1">
               <button
                 onClick={() => setActiveBldg(null)}
@@ -776,9 +808,10 @@ function FaultPanel({ buildings, nodes, faultedIds, onInject, onClear, onSelect,
                 );
               })}
             </div>
+            )}
 
             {/* Category filter chips — wrap */}
-            {presentCats.size > 1 && (
+            {tab === 'live' && presentCats.size > 1 && (
               <div className="flex flex-wrap gap-1">
                 <button
                   onClick={() => setActiveCat(null)}
@@ -805,119 +838,257 @@ function FaultPanel({ buildings, nodes, faultedIds, onInject, onClear, onSelect,
             )}
           </div>
 
-          {/* Results summary strip */}
-          <div className="px-4 py-1 flex items-center gap-1.5 border-b border-white/5 text-[10px] text-zinc-500 bg-zinc-950/40">
-            <span className="font-mono text-zinc-300">{filtered.length}</span>
-            <span>of</span>
-            <span className="font-mono">{nodes.length}</span>
-            <span>objects</span>
-            {activeFilterCount > 0 && (
-              <button
-                onClick={() => { setActiveBldg(null); setActiveCat(null); setQuery(''); }}
-                className="ml-auto text-zinc-600 hover:text-zinc-400 flex items-center gap-0.5"
-              >
-                <X size={10} /> clear filters
-              </button>
-            )}
-          </div>
+          {tab === 'history' ? (
+            <FaultHistoryList />
+          ) : (
+            <>
+              {/* Results summary strip */}
+              <div className="px-4 py-1 flex items-center gap-1.5 border-b border-white/5 text-[10px] text-zinc-500 bg-zinc-950/40">
+                <span className="font-mono text-zinc-300">{filtered.length}</span>
+                <span>of</span>
+                <span className="font-mono">{nodes.length}</span>
+                <span>objects</span>
+                {activeFilterCount > 0 && (
+                  <button
+                    onClick={() => { setActiveBldg(null); setActiveCat(null); setQuery(''); }}
+                    className="ml-auto text-zinc-600 hover:text-zinc-400 flex items-center gap-0.5"
+                  >
+                    <X size={10} /> clear filters
+                  </button>
+                )}
+              </div>
 
-          {/* ── Node list ── */}
-          <ScrollArea className="flex-1 scrollbar-thin">
-            <div className="px-3 py-2 space-y-1">
-              {presentBuildings.map((b) => {
-                const items = grouped.get(b.code) || [];
-                if (!items.length) return null;
-                const isColl = collapsedBldgs.has(b.code);
-                return (
-                  <div key={b.code}>
-                    {/* Building header — click to collapse/expand */}
-                    <button
-                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-white/[0.03] transition-colors group/bldg"
-                      onClick={() => toggleBldg(b.code)}
-                    >
-                      <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ background: b.accent }} />
-                      <span className="text-[10px] font-bold tracking-[0.14em] uppercase text-zinc-400 flex-1 text-left group-hover/bldg:text-zinc-300">
-                        {b.name}
-                      </span>
-                      <span className="text-[9px] text-zinc-600 font-mono">{items.length}</span>
-                      <ChevronRight
-                        size={11}
-                        className={`text-zinc-600 transition-transform ${isColl ? '' : 'rotate-90'}`}
-                      />
-                    </button>
+              {/* ── Node list ── */}
+              <ScrollArea className="flex-1 scrollbar-thin">
+                <div className="px-3 py-2 space-y-1">
+                  {presentBuildings.map((b) => {
+                    const items = grouped.get(b.code) || [];
+                    if (!items.length) return null;
+                    const isColl = collapsedBldgs.has(b.code);
+                    return (
+                      <div key={b.code}>
+                        {/* Building header — click to collapse/expand */}
+                        <button
+                          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-white/[0.03] transition-colors group/bldg"
+                          onClick={() => toggleBldg(b.code)}
+                        >
+                          <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ background: b.accent }} />
+                          <span className="text-[10px] font-bold tracking-[0.14em] uppercase text-zinc-400 flex-1 text-left group-hover/bldg:text-zinc-300">
+                            {b.name}
+                          </span>
+                          <span className="text-[9px] text-zinc-600 font-mono">{items.length}</span>
+                          <ChevronRight
+                            size={11}
+                            className={`text-zinc-600 transition-transform ${isColl ? '' : 'rotate-90'}`}
+                          />
+                        </button>
 
-                    {!isColl && (
-                      <div className="space-y-0.5 mb-1">
-                        {items.map((n) => {
-                          const Icon = iconFor(n.type_icon);
-                          const isFaulted = faultedIds.has(n.id);
-                          const isAffected = n.status === 'affected';
-                          return (
-                            <div
-                              key={n.id}
-                              className={`group flex items-center gap-2 px-2 py-1 rounded-md border cursor-pointer transition-colors ${
-                                selectedId === n.id
-                                  ? 'bg-orange-500/10 border-orange-500/40'
-                                  : isFaulted
-                                  ? 'bg-red-500/10 border-red-500/40'
-                                  : isAffected
-                                  ? 'bg-amber-500/[0.06] border-amber-500/25'
-                                  : 'border-transparent hover:bg-white/[0.03] hover:border-white/5'
-                              }`}
-                              onClick={() => onSelect(n)}
-                            >
-                              <Icon
-                                size={12}
-                                className={`flex-shrink-0 ${isFaulted ? 'text-red-400' : isAffected ? 'text-amber-400' : 'text-zinc-500'}`}
-                              />
-                              <div className="flex-1 min-w-0">
-                                <div className="text-[11px] font-medium text-zinc-200 truncate leading-tight">
-                                  {n.name}
+                        {!isColl && (
+                          <div className="space-y-0.5 mb-1">
+                            {items.map((n) => {
+                              const Icon = iconFor(n.type_icon);
+                              const isFaulted = faultedIds.has(n.id);
+                              const isAffected = n.status === 'affected';
+                              return (
+                                <div
+                                  key={n.id}
+                                  className={`group flex items-center gap-2 px-2 py-1 rounded-md border cursor-pointer transition-colors ${
+                                    selectedId === n.id
+                                      ? 'bg-orange-500/10 border-orange-500/40'
+                                      : isFaulted
+                                      ? 'bg-red-500/10 border-red-500/40'
+                                      : isAffected
+                                      ? 'bg-amber-500/[0.06] border-amber-500/25'
+                                      : 'border-transparent hover:bg-white/[0.03] hover:border-white/5'
+                                  }`}
+                                  onClick={() => onSelect(n)}
+                                >
+                                  <Icon
+                                    size={12}
+                                    className={`flex-shrink-0 ${isFaulted ? 'text-red-400' : isAffected ? 'text-amber-400' : 'text-zinc-500'}`}
+                                  />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="text-[11px] font-medium text-zinc-200 truncate leading-tight">
+                                      {n.name}
+                                    </div>
+                                    <div className="text-[9px] text-zinc-600 font-mono">
+                                      {n.id} · {n.type_label}
+                                    </div>
+                                  </div>
+                                  <button
+                                    title={isFaulted ? 'Clear fault' : 'Inject fault'}
+                                    className={`flex-shrink-0 h-6 w-6 rounded flex items-center justify-center border transition-colors ${
+                                      isFaulted
+                                        ? 'bg-red-500/20 border-red-500/50 text-red-400 hover:bg-red-500/30'
+                                        : 'bg-white/[0.04] border-white/10 text-zinc-400 hover:bg-white/10 hover:text-zinc-200'
+                                    }`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onInject(n.id);
+                                    }}
+                                  >
+                                    {isFaulted ? <X size={10} /> : <Zap size={10} />}
+                                  </button>
                                 </div>
-                                <div className="text-[9px] text-zinc-600 font-mono">
-                                  {n.id} · {n.type_label}
-                                </div>
-                              </div>
-                              <button
-                                title={isFaulted ? 'Clear fault' : 'Inject fault'}
-                                className={`flex-shrink-0 h-6 w-6 rounded flex items-center justify-center border transition-colors ${
-                                  isFaulted
-                                    ? 'bg-red-500/20 border-red-500/50 text-red-400 hover:bg-red-500/30'
-                                    : 'bg-white/[0.04] border-white/10 text-zinc-400 hover:bg-white/10 hover:text-zinc-200'
-                                }`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onInject(n.id);
-                                }}
-                              >
-                                {isFaulted ? <X size={10} /> : <Zap size={10} />}
-                              </button>
-                            </div>
-                          );
-                        })}
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                );
-              })}
+                    );
+                  })}
 
-              {filtered.length === 0 && (
-                <div className="py-8 text-center text-[11px] text-zinc-600">
-                  No objects match the current filters.
+                  {filtered.length === 0 && (
+                    <div className="py-8 text-center text-[11px] text-zinc-600">
+                      No objects match the current filters.
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          </ScrollArea>
+              </ScrollArea>
+            </>
+          )}
         </>
       )}
     </motion.aside>
   );
 }
 
+function formatDuration(ms) {
+  if (ms < 0) return '0s';
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${sec}s`;
+  return `${sec}s`;
+}
+
+// =====================================================================
+// Fault history — past + open fault_events, each with the auto-generated
+// Markdown incident report (populated once a fault clears, via the
+// trg_fault_events_report Postgres trigger).
+// =====================================================================
+function FaultHistoryList() {
+  const { events, loading, error, refresh } = useFaultHistory();
+  const [expandedId, setExpandedId] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
+
+  const downloadReport = (e) => {
+    const code = e.objects?.code || e.object_id;
+    const stamp = new Date(e.started_at).toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    const blob = new Blob([e.report_md], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `fault-report_${code}_${stamp}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const copyReport = (e) => {
+    navigator.clipboard.writeText(e.report_md).then(() => {
+      setCopiedId(e.id);
+      setTimeout(() => setCopiedId((cur) => (cur === e.id ? null : cur)), 1500);
+    });
+  };
+
+  return (
+    <ScrollArea className="flex-1 scrollbar-thin">
+      <div className="px-3 py-2 space-y-1.5">
+        <div className="flex items-center justify-between px-1 pb-1">
+          <span className="text-[10px] text-zinc-500">
+            {events.length} event{events.length !== 1 ? 's' : ''}
+          </span>
+          <button onClick={refresh} className="text-zinc-600 hover:text-zinc-300 transition-colors" title="Refresh">
+            <RefreshCw size={11} />
+          </button>
+        </div>
+
+        {loading && <div className="py-8 text-center text-[11px] text-zinc-600">Loading…</div>}
+        {error && <div className="py-4 text-center text-[11px] text-red-400">{error}</div>}
+        {!loading && !error && events.length === 0 && (
+          <div className="py-8 text-center text-[11px] text-zinc-600">No fault events yet.</div>
+        )}
+
+        {events.map((e) => {
+          const isOpen = expandedId === e.id;
+          const stillOpen = !e.ended_at;
+          const duration = e.ended_at
+            ? formatDuration(new Date(e.ended_at) - new Date(e.started_at))
+            : null;
+          const stateCls =
+            e.state === 'real_alarm' ? 'text-red-400 border-red-500/30 bg-red-500/10'
+            : e.state === 'cleared' ? 'text-zinc-400 border-white/10 bg-white/[0.03]'
+            : 'text-amber-400 border-amber-500/30 bg-amber-500/10';
+          return (
+            <div key={e.id} className="rounded-md border border-white/5 bg-white/[0.02] overflow-hidden">
+              <button
+                className="w-full flex items-center gap-2 px-2.5 py-2 text-left hover:bg-white/[0.03] transition-colors"
+                onClick={() => setExpandedId(isOpen ? null : e.id)}
+              >
+                <Clock size={12} className="text-zinc-500 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11px] font-medium text-zinc-200 truncate">
+                    {e.objects?.code || e.object_id} — {e.objects?.name || 'unknown'}
+                  </div>
+                  <div className="text-[9px] text-zinc-600 font-mono">
+                    {new Date(e.started_at).toLocaleString()}
+                    {duration ? ` · ${duration}` : stillOpen ? ' · still open' : ''}
+                  </div>
+                </div>
+                <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border flex-shrink-0 ${stateCls}`}>
+                  {e.state}
+                </span>
+                <ChevronRight
+                  size={11}
+                  className={`text-zinc-600 transition-transform flex-shrink-0 ${isOpen ? 'rotate-90' : ''}`}
+                />
+              </button>
+              {isOpen && (
+                <div className="border-t border-white/5 p-2.5">
+                  {e.report_md ? (
+                    <>
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <button
+                          onClick={() => downloadReport(e)}
+                          className="flex items-center gap-1 h-6 px-2 rounded text-[10px] font-medium bg-white/[0.04] border border-white/10 text-zinc-300 hover:bg-white/10 transition-colors"
+                        >
+                          <Download size={10} /> Download .md
+                        </button>
+                        <button
+                          onClick={() => copyReport(e)}
+                          className="flex items-center gap-1 h-6 px-2 rounded text-[10px] font-medium bg-white/[0.04] border border-white/10 text-zinc-300 hover:bg-white/10 transition-colors"
+                        >
+                          {copiedId === e.id ? <><Check size={10} className="text-emerald-400" /> Copied</> : <><Copy size={10} /> Copy</>}
+                        </button>
+                      </div>
+                      <pre className="text-[10px] text-zinc-400 whitespace-pre-wrap font-mono bg-black/30 rounded p-2 max-h-64 overflow-auto">
+                        {e.report_md}
+                      </pre>
+                    </>
+                  ) : (
+                    <div className="text-[10px] text-zinc-600 italic flex items-center gap-1.5">
+                      <FileText size={11} />
+                      {stillOpen ? 'Report generates automatically once this fault is cleared.' : 'No report available.'}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </ScrollArea>
+  );
+}
+
 // =====================================================================
 // Node drawer
 // =====================================================================
-function NodeDrawer({ node, allNodes, faultedIds, onInject, onClear, onOpenChange }) {
+function NodeDrawer({ node, allNodes, faultedIds, onInject, onClear, ack, onAcknowledge, onOpenChange }) {
   const isMobile = useIsMobile();
   if (!node) return null;
   const current = allNodes.find((n) => n.id === node.id) || node;
@@ -1003,15 +1174,28 @@ function NodeDrawer({ node, allNodes, faultedIds, onInject, onClear, onOpenChang
           <div className="p-6 space-y-5">
             <div className="flex gap-2">
               {isFaulted ? (
-                <Button onClick={() => onClear(current.id)} variant="outline" className="flex-1 border-white/10">
-                  <CheckCircle2 size={14} className="mr-2" /> Clear Fault
-                </Button>
+                <>
+                  {!ack?.acknowledged_at && (
+                    <Button onClick={() => onAcknowledge(current.id)} variant="outline" className="flex-1 border-amber-500/30 text-amber-300 hover:bg-amber-500/10">
+                      <ShieldCheck size={14} className="mr-2" /> Acknowledge
+                    </Button>
+                  )}
+                  <Button onClick={() => onClear(current.id)} variant="outline" className="flex-1 border-white/10">
+                    <CheckCircle2 size={14} className="mr-2" /> Clear Fault
+                  </Button>
+                </>
               ) : (
                 <Button onClick={() => onInject(current.id)} variant="destructive" className="flex-1">
                   <Zap size={14} className="mr-2" /> Inject Fault Here
                 </Button>
               )}
             </div>
+            {isFaulted && ack?.acknowledged_at && (
+              <div className="text-[10px] text-amber-300/80 flex items-center gap-1.5 -mt-2">
+                <ShieldCheck size={11} />
+                Acknowledged by {ack.acknowledged_by} at {new Date(ack.acknowledged_at).toLocaleTimeString()}
+              </div>
+            )}
 
             <section>
               <h3 className="text-[10px] font-bold tracking-[0.18em] uppercase text-zinc-500 mb-2 flex items-center gap-1.5">
@@ -1230,6 +1414,12 @@ function StatusBar({ stats, user, onSignOut, onRefresh, refreshing }) {
       <StatPill label="Fault" value={stats.fault} color="red" icon={<Radio size={12} className={stats.fault > 0 ? 'animate-pulse' : ''} />} />
 
       <div className="flex-1" />
+
+      <Link href="/reports">
+        <Button variant="outline" size="sm" className="h-8 text-[11px] border-white/10">
+          <BarChart3 size={12} className="mr-1.5" /> Reports
+        </Button>
+      </Link>
 
       <Button variant="outline" size="sm" onClick={onRefresh} className="h-8 text-[11px] border-white/10">
         <RefreshCw size={12} className={`mr-1.5 ${refreshing ? 'animate-spin' : ''}`} />
@@ -2615,13 +2805,28 @@ function ObjectDetailPanel({ node, allNodes, faultedIds, onClose, onSelect }) {
 
 // =====================================================================
 export default function HomePage() {
-  const { buildings, nodes, types, loading, error, refresh } = useNetworkTopology();
+  const { buildings, nodes, types, loading, error, refresh, openFaultCodes, openFaultAcks } = useNetworkTopology();
+  const supabase = useMemo(() => createClient(), []);
   const [refreshing, setRefreshing] = useState(false);
   const [faultedIds, setFaultedIds] = useState(() => new Set());
+  const [ackByCode, setAckByCode] = useState({}); // code -> { acknowledged_at, acknowledged_by }
   const [selected, setSelected] = useState(null);
   const [collapsed, setCollapsed] = useState(true);
   const [user, setUser] = useState(null);
   const [selectedFloor, setSelectedFloor] = useState(null); // null = All floors (default view)
+
+  // fault_events is the DB source of truth for open faults — reseed local
+  // state from it whenever the topology (re)loads, so refreshing the page
+  // or opening on another device shows the same faults instead of starting
+  // empty every time.
+  useEffect(() => {
+    if (!loading) {
+      setFaultedIds(new Set(openFaultCodes));
+      setAckByCode(openFaultAcks);
+    }
+  }, [loading, openFaultCodes, openFaultAcks]);
+
+  const nodeByCode = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
 
   const [detailNode, setDetailNode] = useState(null);
   const handleSelect = useCallback((n) => {
@@ -2707,23 +2912,99 @@ export default function HomePage() {
     return computed.filter((n) => n.floor === selectedFloor);
   }, [computed, selectedFloor]);
 
+  // Persists a new fault to fault_events (state='injected'). Fire-and-forget
+  // from the UI's perspective — local state already reflects the change
+  // optimistically, so a failed write (e.g. not signed in — INSERT requires
+  // the `authenticated` role per RLS) only means it won't survive a refresh
+  // or notify anyone, not that the click did nothing.
+  const persistInject = useCallback((code) => {
+    const node = nodeByCode.get(code);
+    if (!node?.uuid) return;
+    supabase.from('fault_events').insert({
+      object_id: node.uuid,
+      state: 'injected',
+      triggered_by: user?.email || 'anonymous',
+      impact_snapshot: downstreamOf(computed, code),
+    }).then(({ error }) => {
+      if (error) console.warn('fault_events insert failed (sign in to persist faults):', error.message);
+    });
+  }, [nodeByCode, computed, user, supabase]);
+
+  // Closes the currently-open fault_events row(s) for one object, or every
+  // open row when called with no code (Clear All).
+  const persistClear = useCallback((code) => {
+    // 'now' is a Postgres special date/time literal, evaluated server-side
+    // on write -- deliberately NOT new Date().toISOString(), which would be
+    // the *client's* clock. started_at is already server-computed (column
+    // default now()), so mixing a client timestamp into ended_at risks a
+    // negative duration whenever the two clocks drift (confirmed happening
+    // on this machine: ~2s behind the DB server).
+    let q = supabase.from('fault_events').update({ state: 'cleared', ended_at: 'now' }).is('ended_at', null);
+    if (code) {
+      const node = nodeByCode.get(code);
+      if (!node?.uuid) return;
+      q = q.eq('object_id', node.uuid);
+    }
+    q.then(({ error }) => {
+      if (error) console.warn('fault_events clear failed:', error.message);
+    });
+    setAckByCode((prev) => {
+      if (!code) return {}; // Clear All wipes every open fault, so every ack goes with it
+      if (!(code in prev)) return prev;
+      const next = { ...prev };
+      delete next[code];
+      return next;
+    });
+  }, [nodeByCode, supabase]);
+
+  // Marks the open fault for `code` as acknowledged — separate from Clear,
+  // so MTTA (time-to-acknowledge / "reaction time") can be reported apart
+  // from MTTR (time-to-resolve). Same server-clock-only-timestamp rule as
+  // persistClear applies here.
+  const persistAcknowledge = useCallback((code) => {
+    const node = nodeByCode.get(code);
+    if (!node?.uuid) return;
+    const who = user?.email || 'anonymous';
+    supabase.from('fault_events')
+      .update({ acknowledged_at: 'now', acknowledged_by: who })
+      .eq('object_id', node.uuid)
+      .is('ended_at', null)
+      .is('acknowledged_at', null)
+      .then(({ error }) => {
+        if (error) console.warn('fault_events acknowledge failed:', error.message);
+      });
+    setAckByCode((prev) => ({ ...prev, [code]: { acknowledged_at: new Date().toISOString(), acknowledged_by: who } }));
+  }, [nodeByCode, user, supabase]);
+
   const toggleFault = useCallback((id) => {
+    // Side effects must stay out of the updater — React (Strict Mode) can
+    // invoke it more than once per call to detect exactly this kind of bug.
+    const wasFaulted = faultedIds.has(id);
     setFaultedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
+      if (wasFaulted) next.delete(id);
       else next.add(id);
       return next;
     });
-  }, []);
-  const inject = useCallback((id) => setFaultedIds((p) => new Set(p).add(id)), []);
+    if (wasFaulted) persistClear(id);
+    else persistInject(id);
+  }, [faultedIds, persistInject, persistClear]);
+  const inject = useCallback((id) => {
+    setFaultedIds((p) => new Set(p).add(id));
+    persistInject(id);
+  }, [persistInject]);
   const clearOne = useCallback((id) => {
     setFaultedIds((p) => {
       const n = new Set(p);
       n.delete(id);
       return n;
     });
-  }, []);
-  const clearAll = useCallback(() => setFaultedIds(new Set()), []);
+    persistClear(id);
+  }, [persistClear]);
+  const clearAll = useCallback(() => {
+    setFaultedIds(new Set());
+    persistClear();
+  }, [persistClear]);
 
   const stats = useMemo(() => {
     const s = { operational: 0, affected: 0, fault: 0 };
@@ -3342,6 +3623,8 @@ export default function HomePage() {
           faultedIds={faultedIds}
           onInject={inject}
           onClear={clearOne}
+          ack={selected ? ackByCode[selected.id] : null}
+          onAcknowledge={persistAcknowledge}
           onOpenChange={(open) => !open && setSelected(null)}
         />
 

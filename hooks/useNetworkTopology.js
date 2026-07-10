@@ -85,12 +85,26 @@ function resolveCoordsCm(o, building) {
   };
 }
 
-function reshape({ floors, object_types, objects, dependencies }) {
+function reshape({ floors, object_types, objects, dependencies, fault_events }) {
   const buildings = BUILDINGS_LAYOUT;
   const typeById = new Map(object_types.map((t) => [t.id, t]));
   const buildingById = new Map(buildings.map((b) => [b.id, b]));
   const floorById = new Map(floors.map((f) => [f.id, f]));
   const objectById = new Map(objects.map((o) => [o.id, o]));
+
+  // Currently-open fault events (ended_at is null) -> codes, so the UI can
+  // seed faultedIds from the DB instead of starting empty on every load.
+  const openFaultRows = (fault_events || []).filter((e) => e.ended_at == null);
+  const openFaultCodes = openFaultRows
+    .map((e) => objectById.get(e.object_id)?.code)
+    .filter(Boolean);
+  // Acknowledgment state per open fault, keyed by object code, so the
+  // NodeDrawer can show/hide the Acknowledge action and who/when.
+  const openFaultAcks = {};
+  for (const e of openFaultRows) {
+    const code = objectById.get(e.object_id)?.code;
+    if (code) openFaultAcks[code] = { acknowledged_at: e.acknowledged_at, acknowledged_by: e.acknowledged_by };
+  }
 
   // Group objects by (building_id, floor_id, zone-key) so we can
   // spread them within a room rather than stacking at the same point.
@@ -242,7 +256,7 @@ function reshape({ floors, object_types, objects, dependencies }) {
   // Category -> human label (for legend / quick filters)
   const categories = Array.from(new Set(object_types.map((t) => t.category)));
 
-  return { buildings: uiBuildings, nodes: uiNodes, types: object_types, categories };
+  return { buildings: uiBuildings, nodes: uiNodes, types: object_types, categories, openFaultCodes, openFaultAcks };
 }
 
 // Fetches all rows from a Supabase table by paginating in batches of PAGE_SIZE,
@@ -269,13 +283,14 @@ export function useNetworkTopology() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const [f, t, o, d] = await Promise.all([
+    const [f, t, o, d, fe] = await Promise.all([
       fetchAll(supabase.from('floors').select('*')),
       fetchAll(supabase.from('object_types').select('*')),
       fetchAll(supabase.from('objects').select('*')),
       fetchAll(supabase.from('dependencies').select('*')),
+      fetchAll(supabase.from('fault_events').select('*').is('ended_at', null)),
     ]);
-    const first = [f, t, o, d].find((r) => r.error);
+    const first = [f, t, o, d, fe].find((r) => r.error);
     if (first?.error) {
       setError(first.error.message);
       setLoading(false);
@@ -286,6 +301,7 @@ export function useNetworkTopology() {
       object_types: t.data || [],
       objects: o.data || [],
       dependencies: d.data || [],
+      fault_events: fe.data || [],
     });
     setLoading(false);
   }, [supabase]);
@@ -303,6 +319,8 @@ export function useNetworkTopology() {
     nodes: shaped?.nodes || [],
     types: shaped?.types || [],
     categories: shaped?.categories || [],
+    openFaultCodes: shaped?.openFaultCodes || [],
+    openFaultAcks: shaped?.openFaultAcks || {},
     refresh: load,
   };
 }
