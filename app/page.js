@@ -56,6 +56,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { computeNetworkStatus, downstreamOf } from '@/lib/network-utils';
 import { useNetworkTopology, CM_PER_PX } from '@/hooks/useNetworkTopology';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { createClient } from '@/lib/supabase/client';
 
 // Icon registry: map icon name string -> lucide component
@@ -917,6 +918,7 @@ function FaultPanel({ buildings, nodes, faultedIds, onInject, onClear, onSelect,
 // Node drawer
 // =====================================================================
 function NodeDrawer({ node, allNodes, faultedIds, onInject, onClear, onOpenChange }) {
+  const isMobile = useIsMobile();
   if (!node) return null;
   const current = allNodes.find((n) => n.id === node.id) || node;
   const Icon = iconFor(current.type_icon);
@@ -939,10 +941,14 @@ function NodeDrawer({ node, allNodes, faultedIds, onInject, onClear, onOpenChang
   return (
     <Sheet open={!!node} onOpenChange={onOpenChange}>
       <SheetContent
-        side="right"
-        className="w-[440px] sm:max-w-[480px] bg-zinc-950/95 border-l border-white/5 text-zinc-100 backdrop-blur-xl p-0"
+        side={isMobile ? 'bottom' : 'right'}
+        className={
+          isMobile
+            ? 'h-[85vh] max-h-[85vh] rounded-t-2xl bg-zinc-950/95 border-t border-white/5 text-zinc-100 backdrop-blur-xl p-0 flex flex-col'
+            : 'w-[440px] sm:max-w-[480px] bg-zinc-950/95 border-l border-white/5 text-zinc-100 backdrop-blur-xl p-0 flex flex-col'
+        }
       >
-        <SheetHeader className="p-6 pb-4 border-b border-white/5">
+        <SheetHeader className="p-6 pb-4 border-b border-white/5 shrink-0">
           <div className="flex items-center gap-3">
             <div
               className={`h-11 w-11 rounded-lg flex items-center justify-center border ${
@@ -993,7 +999,7 @@ function NodeDrawer({ node, allNodes, faultedIds, onInject, onClear, onOpenChang
           </div>
         </SheetHeader>
 
-        <ScrollArea className="h-[calc(100vh-180px)] scrollbar-thin">
+        <ScrollArea className="flex-1 min-h-0 scrollbar-thin">
           <div className="p-6 space-y-5">
             <div className="flex gap-2">
               {isFaulted ? (
@@ -2018,6 +2024,120 @@ function GenDpElevation() {
   );
 }
 
+// =====================================================================
+// Data-driven single-busbar distribution panel elevations. Keyed by
+// object code (node.id) — add a new entry once a real panel drawing is
+// available, and it renders automatically via DistributionBusbarElevation
+// below. Same "row of feeder breakers off one busbar" convention already
+// used for the MV panel rows (Fur10/Fur20 Main MV Panel).
+// =====================================================================
+const DISTRIBUTION_PANEL_DATA = {
+  'UTL-TRDP-1.3': {
+    title: 'TR-DP1.3',
+    subtitle: '400V/230V 50Hz · IP31 · Form 4B TYPE6 · PROCESS',
+    incomer: { label: 'TR 1.3', rating: '2500 kVA' },
+    feeders: [
+      { label: 'DISTRIBUTION BUILDING', target: 'DST-DP-UP',   rating: '6.5 kW',  kind: 'out' },
+      { label: 'LPG BUILDING',          target: 'LPG-DP',      rating: '5.45 kW', kind: 'out' },
+      { label: 'PEDESTRIAN GUARD',      target: 'GUH-DP-UP',   rating: '6.7 kW',  kind: 'out' },
+      { label: 'TRUCK GUARD',           target: 'TRG-DP-UP1',  rating: '13.3 kW', kind: 'out' },
+      { label: 'EV CHARGING',           target: 'UTL-EV-CHG',  rating: '150 kW',  kind: 'out' },
+      { label: 'SPARE-17', kind: 'spare' },
+      { label: 'SPARE-7',  kind: 'spare' },
+      { label: 'SPARE-1',  kind: 'spare' },
+      { label: 'SPARE-2',  kind: 'spare' },
+      { label: 'SPARE-3',  kind: 'spare' },
+      { label: 'SPARE-4',  kind: 'spare' },
+      { label: 'SPARE-5',  kind: 'spare' },
+      { label: 'SPARE-6',  kind: 'spare' },
+      { label: '7 BAR COMPRESSOR', target: 'UTL-COMP7-1', rating: '2×354.3A', kind: 'out' },
+      { label: 'SPARE-8', kind: 'spare' },
+      { label: 'COUPLING TO SYNC', target: 'SYNCHRONIZATION PANEL', rating: '(4)', kind: 'tie' },
+      { label: 'SPARE-9',  kind: 'spare' },
+      { label: 'SPARE-10', kind: 'spare' },
+      { label: 'SPARE-11', kind: 'spare' },
+      { label: 'SPARE-12', kind: 'spare' },
+      { label: 'SPARE-13', kind: 'spare' },
+      { label: 'SPARE-14', kind: 'spare' },
+      { label: 'SPARE-15', kind: 'spare' },
+      { label: 'SPARE-16', kind: 'spare' },
+    ],
+    pfc: { label: 'TR-DP1.3 PFC w/ Harmonic Filter', target: 'UTL-PFC-1.3', rating: '1500 kVAr' },
+    source: 'Panel elevation drawing (Utility Building, Level 5m)',
+  },
+};
+
+const DP_KIND_CLR = { out: '#22c55e', spare: '#f59e0b', tie: '#06b6d4', empty: '#3f3f46' };
+
+function DistributionBusbarElevation({ data }) {
+  const PAD_X   = 20;
+  const COL_W   = 62;
+  const BODY_Y  = 60;
+  const BUS_Y   = BODY_Y + 90;
+  const CELL_H  = 70;
+  const n       = data.feeders.length;
+  const TOTAL_W = PAD_X * 2 + COL_W * (n + 1); // +1 for incomer column
+  const TOTAL_H = BUS_Y + CELL_H + 90;
+
+  const colX = (i) => PAD_X + COL_W * (i + 1) + COL_W / 2; // +1: incomer occupies column 0
+
+  return (
+    <svg viewBox={`0 0 ${TOTAL_W} ${TOTAL_H}`} xmlns="http://www.w3.org/2000/svg"
+         style={{ width: '100%', minWidth: TOTAL_W, height: 'auto' }}>
+      <rect width={TOTAL_W} height={TOTAL_H} fill="#0f172a" rx="6" />
+
+      {/* Incomer */}
+      <g>
+        <line x1={colX(-1)} y1={BODY_Y} x2={colX(-1)} y2={BUS_Y} stroke="#22c55e" strokeWidth="1.5" />
+        <path d={`M ${colX(-1)-5},${BODY_Y+18} L ${colX(-1)+5},${BODY_Y+18} L ${colX(-1)},${BODY_Y+30} Z`} fill="#22c55e" />
+        <text x={colX(-1)} y={BODY_Y - 10} textAnchor="middle" fill="#22c55e" fontSize="8" fontWeight="700">{data.incomer.label}</text>
+        <text x={colX(-1)} y={BODY_Y - 1} textAnchor="middle" fill="#22c55e" fontSize="6.5" opacity="0.75">{data.incomer.rating}</text>
+      </g>
+
+      {/* Busbar */}
+      <line x1={PAD_X} y1={BUS_Y} x2={TOTAL_W - PAD_X} y2={BUS_Y} stroke="#71717a" strokeWidth="3" strokeLinecap="round" />
+
+      {/* Feeder breakers */}
+      {data.feeders.map((f, i) => {
+        const cx = colX(i);
+        const clr = DP_KIND_CLR[f.kind] || '#52525b';
+        return (
+          <g key={i}>
+            <line x1={cx} y1={BUS_Y} x2={cx} y2={BUS_Y + 16} stroke={clr} strokeWidth="1.2" />
+            <rect x={cx - 16} y={BUS_Y + 16} width={32} height={CELL_H - 16} rx="2" fill={`${clr}14`} stroke={clr} strokeWidth="0.8" />
+            <text x={cx} y={BUS_Y + 30} textAnchor="middle" fill={clr} fontSize="5.5" fontWeight="600">
+              {f.label.length > 14 ? f.label.slice(0, 13) + '…' : f.label}
+            </text>
+            {f.rating && (
+              <text x={cx} y={BUS_Y + 41} textAnchor="middle" fill={clr} fontSize="5" opacity="0.75">{f.rating}</text>
+            )}
+            {f.target && (
+              <text x={cx} y={BUS_Y + CELL_H - 4} textAnchor="middle" fill="#3f3f46" fontSize="4.5" fontFamily="monospace">{f.target}</text>
+            )}
+          </g>
+        );
+      })}
+
+      {/* PFC filter, off to the side */}
+      {data.pfc && (
+        <g transform={`translate(${TOTAL_W - PAD_X - 150}, ${BUS_Y + CELL_H + 20})`}>
+          <rect width="150" height="40" rx="3" fill="rgba(59,130,246,0.08)" stroke="#3b82f6" strokeWidth="1" />
+          <text x={75} y={16} textAnchor="middle" fill="#3b82f6" fontSize="6.5" fontWeight="700">{data.pfc.label}</text>
+          <text x={75} y={27} textAnchor="middle" fill="#3b82f6" fontSize="6" opacity="0.8">{data.pfc.rating} · {data.pfc.target}</text>
+        </g>
+      )}
+
+      {/* Legend */}
+      {[['#22c55e','Outgoing feeder'],['#f59e0b','Spare / Reserved'],['#06b6d4','Bus tie']].map(([c,l], i) => (
+        <g key={l} transform={`translate(${PAD_X + i * 170}, ${TOTAL_H - 14})`}>
+          <rect width={8} height={8} rx="1" y={-6} fill={`${c}20`} stroke={c} strokeWidth="0.8" />
+          <text x={12} y={0} fill="#71717a" fontSize="6.5">{l}</text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
 // Generic front-elevation for distribution_board / mcc — scales to num_cabinets
 function GenericCabinetElevation({ node }) {
   const N       = Math.max(1, node.properties?.num_cabinets ?? 1);
@@ -2089,6 +2209,7 @@ function GenericCabinetElevation({ node }) {
 }
 
 function ObjectDetailPanel({ node, allNodes, faultedIds, onClose, onSelect }) {
+  const isMobile = useIsMobile();
   const find = (id) => allNodes.find((n) => n.id === id);
   const parents         = (node.dependsOn || []).map(find).filter(Boolean);
   const downstream      = downstreamOf(allNodes, node.id).map(find).filter(Boolean);
@@ -2102,7 +2223,9 @@ function ObjectDetailPanel({ node, allNodes, faultedIds, onClose, onSelect }) {
   const numCabinets = node.properties?.num_cabinets ?? 1;
   const isSyncPanel  = node.type === 'sync_panel';
   const isGenDp      = node.id?.endsWith('-GEN-DP');
-  const isDistPanel  = !isGenDp && !isSyncPanel && ['distribution_board', 'mcc', 'cabinet'].includes(node.type);
+  const dpBusbarData = DISTRIBUTION_PANEL_DATA[node.id];
+  const isDpBusbar   = !!dpBusbarData;
+  const isDistPanel  = !isGenDp && !isSyncPanel && !isDpBusbar && ['distribution_board', 'mcc', 'cabinet'].includes(node.type);
   const borderColor = node.status === 'fault' ? '#ef4444' : node.status === 'affected' ? '#f59e0b' : isSyncPanel ? '#06b6d4' : isGenDp ? '#22c55e' : '#22c55e';
   const Icon = iconFor(node.type_icon);
   const steps = TROUBLESHOOT_STEPS[node.type_category] || TROUBLESHOOT_STEPS.control;
@@ -2181,10 +2304,16 @@ function ObjectDetailPanel({ node, allNodes, faultedIds, onClose, onSelect }) {
         )}
       </div>
 
-      {/* ── Two-column body ── */}
-      <div className="flex-1 flex overflow-hidden">
+      {/* ── Two-column body (stacks vertically on mobile) ── */}
+      <div className={`flex-1 flex overflow-hidden ${isMobile ? 'flex-col' : ''}`}>
         {/* Left — info */}
-        <ScrollArea className="w-[460px] shrink-0 border-r border-white/5">
+        <ScrollArea
+          className={
+            isMobile
+              ? 'w-full max-h-[45vh] shrink-0 border-b border-white/5'
+              : 'w-[460px] shrink-0 border-r border-white/5'
+          }
+        >
           <div className="p-5 space-y-5">
 
             <section>
@@ -2413,12 +2542,14 @@ function ObjectDetailPanel({ node, allNodes, faultedIds, onClose, onSelect }) {
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="px-5 py-3 border-b border-white/5 flex items-center shrink-0">
             <span className="text-[11px] font-bold tracking-widest uppercase text-zinc-500">
-              {isSyncPanel || isGenDp ? 'Front Elevation' : isDistPanel ? 'Cabinet Layout' : 'Cabinet Drawing'}
+              {isSyncPanel || isGenDp || isDpBusbar ? 'Front Elevation' : isDistPanel ? 'Cabinet Layout' : 'Cabinet Drawing'}
             </span>
             {isSyncPanel
               ? <Badge className="text-[9px] bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 ml-auto">SIVACON S8 · P25-0001-P006</Badge>
               : isGenDp
               ? <Badge className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 ml-auto">SIVACON S8 · P25-0001-P023</Badge>
+              : isDpBusbar
+              ? <Badge className="text-[9px] bg-blue-500/10 text-blue-400 border border-blue-500/20 ml-auto">{dpBusbarData.feeders.length} feeders · Level 5m</Badge>
               : isDistPanel
               ? <Badge className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 ml-auto">{node.properties?.num_cabinets ?? 1} cabinet{(node.properties?.num_cabinets ?? 1) !== 1 ? 's' : ''} · schematic</Badge>
               : <Badge variant="outline" className="text-[9px] border-white/10 text-zinc-600 ml-auto">placeholder</Badge>
@@ -2431,6 +2562,15 @@ function ObjectDetailPanel({ node, allNodes, faultedIds, onClose, onSelect }) {
                 <SyncPanelOneLine />
                 <p className="text-[9px] text-zinc-600 mt-2 text-center font-mono">
                   Front elevation · DNT-GROUP P25-0001-P006 rev R2 · 23.07.2025
+                </p>
+              </div>
+            </div>
+          ) : isDpBusbar ? (
+            <div className="flex-1 overflow-auto">
+              <div className="p-5" style={{ minWidth: 'max-content' }}>
+                <DistributionBusbarElevation data={dpBusbarData} />
+                <p className="text-[9px] text-zinc-600 mt-2 text-center font-mono">
+                  {dpBusbarData.source}
                 </p>
               </div>
             </div>
@@ -2485,9 +2625,13 @@ export default function HomePage() {
 
   const [detailNode, setDetailNode] = useState(null);
   const handleSelect = useCallback((n) => {
-    const _isGenDp = n.id?.endsWith('-GEN-DP');
-    const _isDist  = ['distribution_board', 'mcc', 'cabinet'].includes(n.type);
-    if ((n.properties?.num_cabinets ?? 1) >= 3 || _isGenDp || _isDist) {
+    const _isGenDp    = n.id?.endsWith('-GEN-DP');
+    const _isDpBusbar = !!DISTRIBUTION_PANEL_DATA[n.id]; // curated real-drawing panels (e.g. TR-DP1.3) — always detailed, regardless of cabinet count
+    // Generic distribution_board/mcc/cabinet only gets the tiered front-elevation
+    // view when it actually has 3+ cabinets to show; smaller ones go back to the
+    // plain NodeDrawer sidebar (the old view) instead of the elevation drawing.
+    const _isDist = ['distribution_board', 'mcc', 'cabinet'].includes(n.type) && (n.properties?.num_cabinets ?? 1) >= 3;
+    if (_isGenDp || _isDpBusbar || _isDist) {
       setDetailNode(n);
     } else {
       setSelected(n);
@@ -2512,6 +2656,13 @@ export default function HomePage() {
   // cannot zoom out beyond seeing the full plant layout.
   const minZoomRef = React.useRef(0.05);
   const MAX_ZOOM = 30;
+  // Mirrors `zoom` synchronously so rapid-fire wheel/pinch events within the
+  // same React batch each read the truly-latest value instead of the stale
+  // closure — setZoom() alone isn't enough since consecutive calls in one
+  // batch overwrite rather than compound, while setOffset's functional form
+  // does compound, causing zoom/offset to drift apart and the view to jump.
+  const zoomRef = React.useRef(1);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
 
   useEffect(() => {
     const sb = createClient();
@@ -2622,6 +2773,7 @@ export default function HomePage() {
     const fz = Math.min(cw / canvasDims.w, ch / canvasDims.h) * 0.92;
     // Update the dynamic minimum: user can never zoom out past this level
     minZoomRef.current = fz;
+    zoomRef.current = fz;
     setZoom(fz);
     setOffset({
       x: (cw - canvasDims.w * fz) / 2,
@@ -2662,11 +2814,13 @@ export default function HomePage() {
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
     const delta = -e.deltaY * 0.0015;
-    const next = Math.max(minZoomRef.current, Math.min(MAX_ZOOM, zoom * (1 + delta)));
-    const k = next / zoom;
+    const cur = zoomRef.current;
+    const next = Math.max(minZoomRef.current, Math.min(MAX_ZOOM, cur * (1 + delta)));
+    const k = next / cur;
+    zoomRef.current = next;
     setOffset((o) => ({ x: mx - (mx - o.x) * k, y: my - (my - o.y) * k }));
     setZoom(next);
-  }, [zoom]);
+  }, []);
 
   const onMouseDown = useCallback((e) => {
     if (e.button !== 0) return;
@@ -2722,11 +2876,13 @@ export default function HomePage() {
     const el = containerRef.current;
     if (!el) return;
     const cw = el.clientWidth, ch = el.clientHeight;
-    const next = Math.max(minZoomRef.current, Math.min(MAX_ZOOM, zoom * factor));
-    const k = next / zoom;
+    const cur = zoomRef.current;
+    const next = Math.max(minZoomRef.current, Math.min(MAX_ZOOM, cur * factor));
+    const k = next / cur;
+    zoomRef.current = next;
     setOffset((o) => ({ x: cw / 2 - (cw / 2 - o.x) * k, y: ch / 2 - (ch / 2 - o.y) * k }));
     setZoom(next);
-  }, [zoom]);
+  }, []);
 
   // ── Touch: 1-finger pan, 2-finger pinch-zoom (mobile) ──────────────────
   // touchRef persists across renders without retriggering effects — mirrors
@@ -2754,13 +2910,13 @@ export default function HomePage() {
       touchRef.current = {
         mode: 'pinch',
         startDist: touchDist(e.touches[0], e.touches[1]),
-        startZoom: zoom,
+        startZoom: zoomRef.current,
         startOffset: offset,
         mid: touchMid(e.touches[0], e.touches[1], rect),
       };
       setIsDragging(false);
     }
-  }, [offset, zoom]);
+  }, [offset]);
 
   const onTouchMove = useCallback((e) => {
     const t = touchRef.current;
@@ -2771,6 +2927,7 @@ export default function HomePage() {
       const dist = touchDist(e.touches[0], e.touches[1]);
       const next = Math.max(minZoomRef.current, Math.min(MAX_ZOOM, t.startZoom * (dist / t.startDist)));
       const k = next / t.startZoom;
+      zoomRef.current = next;
       setOffset({ x: t.mid.x - (t.mid.x - t.startOffset.x) * k, y: t.mid.y - (t.mid.y - t.startOffset.y) * k });
       setZoom(next);
     }
